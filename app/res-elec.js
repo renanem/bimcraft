@@ -14,7 +14,7 @@
  *   deviceSchedule(devs, levels, opts) · circuitSchedule(devs, opts) → { head, rows, total }
  *   Circuits sized by NBR 5410 (elec/circuit.js, elec/nbr5410.js): each circuit named on devices can have its own entity
  *   (IfcDistributionCircuit; IFC2X3 IfcElectricalCircuit, serving the building, its devices assigned to it) holding the design
- *   (CadCraft_Circuit: Key, Phases, Use, PowerFactor, DemandFactor, Length, Method, Insulation, Ambient, Grouped, Arrangement,
+ *   (CadCraft_Circuit: Key, Phases, Use, LoadUnit (W | VA), PowerFactor, DemandFactor, Length, Method, Insulation, Ambient, Grouped, Arrangement,
  *   Spacing, Soil, SectionMm2, BreakerA, DropLimit, ReducedNeutral); the voltage system is the project's
  *   (CadCraft_ElectricalProject.VoltageSystem, default 127/220).
  *   readElectricalProject(w) · setElectricalProject({ system }) → op
@@ -273,7 +273,7 @@ export function syncElectrical(w, storey) {
 
 // ------------------------------------------------------------------------------------------------------------ circuits (NBR 5410)
 export const CIRCUIT_PSET = 'CadCraft_Circuit', PROJECT_PSET = 'CadCraft_ElectricalProject';
-export const CIRCUIT_DEFAULTS = { phases: 'FN', use: '', pf: 1, demand: 1, length: 0, method: DEFAULT_METHOD, insulation: 'pvc', ambient: 0, grouped: 1, arrangement: '', spacing: 0, soil: 2.5, section: 0, breaker: 0, dropLimit: 4, reducedNeutral: false };
+export const CIRCUIT_DEFAULTS = { phases: 'FN', use: '', apparent: false, pf: 1, demand: 1, length: 0, method: DEFAULT_METHOD, insulation: 'pvc', ambient: 0, grouped: 1, arrangement: '', spacing: 0, soil: 2.5, section: 0, breaker: 0, dropLimit: 4, reducedNeutral: false };
 const oneOf = (v, list, d) => (list.includes(String(v)) ? String(v) : d);
 const pos = (v, d = 0) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
 const projectId = (w) => { try { return ids(w.api, w.mid, 'IFCPROJECT')[0] ?? null; } catch (e) { return null; } };
@@ -305,7 +305,7 @@ export function readCircuits(w) {
       const pf = Number(ps.PowerFactor), dm = Number(ps.DemandFactor);
       out.set(label, {
         id, guid: val(w.api.GetLine(w.mid, id, false).GlobalId), label,
-        phases: oneOf(ps.Phases, PHASES, 'FN'), use: oneOf(ps.Use, ['lighting', 'power'], ''), pf: pf > 0 && pf <= 1 ? pf : 1, demand: dm > 0 && dm <= 1 ? dm : 1,
+        phases: oneOf(ps.Phases, PHASES, 'FN'), use: oneOf(ps.Use, ['lighting', 'power'], ''), apparent: ps.LoadUnit === 'VA', pf: pf > 0 && pf <= 1 ? pf : 1, demand: dm > 0 && dm <= 1 ? dm : 1,
         length: pos(ps.Length) * w.unitMm / 1000, method: oneOf(ps.Method, METHOD_KEYS, DEFAULT_METHOD), insulation: oneOf(ps.Insulation, ['pvc', 'epr'], 'pvc'),
         ambient: pos(ps.Ambient), grouped: Math.max(1, Math.round(pos(ps.Grouped, 1))), arrangement: oneOf(ps.Arrangement, ['', 'bundle'], ''), spacing: pos(ps.Spacing), soil: pos(ps.Soil, 2.5) || 2.5,
         section: SECTIONS.includes(Number(ps.SectionMm2)) ? Number(ps.SectionMm2) : 0, breaker: BREAKERS.includes(Number(ps.BreakerA)) ? Number(ps.BreakerA) : 0,
@@ -328,13 +328,13 @@ function ensureCircuit(w, label) {
   return id;
 }
 const CIRCUIT_ROWS = {
-  phases: (w, v) => ['Phases', 'IFCLABEL', v], use: (w, v) => ['Use', 'IFCLABEL', v], pf: (w, v) => ['PowerFactor', 'IFCREAL', round(v, 4)], demand: (w, v) => ['DemandFactor', 'IFCREAL', round(v, 4)],
+  phases: (w, v) => ['Phases', 'IFCLABEL', v], loadUnit: (w, v) => ['LoadUnit', 'IFCLABEL', v], use: (w, v) => ['Use', 'IFCLABEL', v], pf: (w, v) => ['PowerFactor', 'IFCREAL', round(v, 4)], demand: (w, v) => ['DemandFactor', 'IFCREAL', round(v, 4)],
   length: (w, v) => ['Length', 'IFCLENGTHMEASURE', round(w.u(v * 1000))], method: (w, v) => ['Method', 'IFCLABEL', v], insulation: (w, v) => ['Insulation', 'IFCLABEL', v], ambient: (w, v) => ['Ambient', 'IFCREAL', round(v, 2)],
   grouped: (w, v) => ['Grouped', 'IFCINTEGER', Math.round(v)], arrangement: (w, v) => ['Arrangement', 'IFCLABEL', v], spacing: (w, v) => ['Spacing', 'IFCREAL', round(v, 3)], soil: (w, v) => ['Soil', 'IFCREAL', round(v, 3)],
   section: (w, v) => ['SectionMm2', 'IFCREAL', v], breaker: (w, v) => ['BreakerA', 'IFCREAL', v], dropLimit: (w, v) => ['DropLimit', 'IFCREAL', round(v, 3)], reducedNeutral: (w, v) => ['ReducedNeutral', 'IFCINTEGER', v ? 1 : 0],
 };
 const valid = {
-  phases: (v) => PHASES.includes(v), use: (v) => v === '' || v === 'lighting' || v === 'power', pf: (v) => v > 0 && v <= 1, demand: (v) => v > 0 && v <= 1, length: (v) => v >= 0 && v < 1e5,
+  phases: (v) => PHASES.includes(v), loadUnit: (v) => v === 'W' || v === 'VA', use: (v) => v === '' || v === 'lighting' || v === 'power', pf: (v) => v > 0 && v <= 1, demand: (v) => v > 0 && v <= 1, length: (v) => v >= 0 && v < 1e5,
   method: (v) => METHOD_KEYS.includes(String(v)), insulation: (v) => v === 'pvc' || v === 'epr', ambient: (v) => v === 0 || (v >= 10 && v <= 80), grouped: (v) => v >= 1 && v <= 1000, arrangement: (v) => v === '' || v === 'bundle',
   spacing: (v) => v >= 0 && v <= 100, soil: (v) => v >= 1 && v <= 10, section: (v) => v === 0 || SECTIONS.includes(v), breaker: (v) => v === 0 || BREAKERS.includes(v), dropLimit: (v) => v > 0 && v <= 100, reducedNeutral: () => true,
 };
@@ -346,7 +346,7 @@ export function setCircuit(label, patch) {
     const rows = [];
     for (const [k, v] of Object.entries(patch)) {
       if (!CIRCUIT_ROWS[k]) continue;
-      if (!valid[k](typeof v === 'string' && !['phases', 'use', 'method', 'insulation', 'arrangement'].includes(k) ? Number(v) : v)) fail('res.err.elcircuit');
+      if (!valid[k](typeof v === 'string' && !['phases', 'use', 'method', 'insulation', 'arrangement', 'loadUnit'].includes(k) ? Number(v) : v)) fail('res.err.elcircuit');
       rows.push(CIRCUIT_ROWS[k](w, v));
     }
     const id = ensureCircuit(w, name);

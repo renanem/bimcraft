@@ -864,6 +864,7 @@ export function mountRes(modelUi) {
     kit.field(t('res.el.cd.system'), opt(Object.keys(SYSTEMS).map((k) => [k, k + ' V']), sys, 'data-mp-elsystem', (v) => A.commit(setElectricalProject({ system: v }), meta)));   // i18n-ignore: volts
     kit.field(t('res.el.cd.phases'), opt(PHASES.map((x) => [x, t('res.el.cd.phases.' + x)]), c.phases, 'data-mp-elphases', (v) => set({ phases: v })));
     kit.field(t('res.el.cd.use'), opt([['', t('res.el.cd.use.auto', { use: t('res.el.cd.use.' + p.autoUse) })], ['lighting', t('res.el.cd.use.lighting')], ['power', t('res.el.cd.use.power')]], p.rec.use || '', 'data-mp-eluse', (v) => set({ use: v })));
+    kit.field(t('res.el.cd.loadunit'), opt([['W', t('res.el.cd.loadunit.W')], ['VA', t('res.el.cd.loadunit.VA')]], c.apparent ? 'VA' : 'W', 'data-mp-elloadunit', (v) => set({ loadUnit: v })));
     kit.field(t('res.el.cd.pf'), num(c.pf === 1 ? '' : c.pf, 'data-mp-elpf', (v) => (v > 0 && v <= 1 ? set({ pf: v }) : A.host.status(t('mep.err.number'), true)), '1'));
     kit.field(t('res.el.cd.demand'), num(c.demand === 1 ? '' : c.demand, 'data-mp-eldemand', (v) => (v > 0 && v <= 1 ? set({ demand: v }) : A.host.status(t('mep.err.number'), true)), '1'));
     kit.field(t('res.el.cd.length'), kit.lenInput(c.length * 1000, 'data-mp-ellength', (mm) => set({ length: mm / 1000 }), { allowZero: true }));
@@ -879,6 +880,7 @@ export function mountRes(modelUi) {
     }
     kit.field(t('res.el.cd.droplimit'), num(c.dropLimit === 4 ? '' : c.dropLimit, 'data-mp-eldroplimit', (v) => (v > 0 ? set({ dropLimit: v }) : A.host.status(t('mep.err.number'), true)), '4'));
     if (c.phases === '3FN') kit.field(t('res.el.cd.neutral'), opt([['0', t('res.el.cd.neutral.same')], ['1', t('res.el.cd.neutral.reduced')]], c.reducedNeutral ? '1' : '0', 'data-mp-elneutral', (v) => set({ reducedNeutral: v === '1' })));
+    if (c.reducedNeutral && c.phases === '3FN') kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-input-err', 'data-mp-elneutralwarn': '' }, t('res.el.cd.neutral.warn')));
     kit.field(t('res.el.cd.section'), opt([['0', t('res.el.cd.none')], ...SECTIONS.map((x) => [String(x), x + ' mm²'])], String(c.section || 0), 'data-mp-elsection', (v) => set({ section: Number(v) })));   // i18n-ignore: unit
     kit.field(t('res.el.cd.breaker'), opt([['0', t('res.el.cd.none')], ...BREAKERS.map((x) => [String(x), x + ' A'])], String(c.breaker || 0), 'data-mp-elbreaker', (v) => set({ breaker: Number(v) })));   // i18n-ignore: unit
     // what follows

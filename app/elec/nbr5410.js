@@ -172,8 +172,11 @@ export const COPPER_ALPHA = 0.00393;   // per °C
 export const resistance = (section, insulation) => RESISTANCE_20[section] * (1 + COPPER_ALPHA * (INSULATIONS[insulation].maxC - 20));
 export const REACTANCE = 0.1;   // Ω/km, conductors in a conduit; with it the voltage drop agrees with the makers' V/A·km tables within about 3 %
 
-/** Circuit breaker ratings (A) the sizing chooses among: the IEC 60898 preferred values and the usual moulded-case ones above 125 A. */
-export const BREAKERS = [6, 10, 16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000];
+/** Circuit breaker ratings (A) the sizing chooses among: the IEC 60898 preferred values, 70 and 90 A (made by some makers only: the
+ *  project checks the line it specifies has them), and the usual moulded-case ones above 125 A. */
+export const BREAKERS = [6, 10, 16, 20, 25, 32, 40, 50, 63, 70, 80, 90, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000];
+/** The current that makes a breaker act within the conventional time, as a multiple of its rating: 1.45 for the breakers of NBR NM 60898. */
+export const TRIP_FACTOR = 1.45;
 
 /** Voltage systems (phase to neutral / phase to phase, V). */
 export const SYSTEMS = { '127/220': { fn: 127, ff: 220 }, '220/380': { fn: 220, ff: 380 }, '230/400': { fn: 230, ff: 400 } };

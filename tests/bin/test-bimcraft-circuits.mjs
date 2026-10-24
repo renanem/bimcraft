@@ -119,6 +119,17 @@ for (const [s, row] of Object.entries(maker)) [['FN', 0.8], ['FN', 0.95], ['3F',
 });
 ok(worst < 0.04, 'the voltage drop (R at 70 °C and 0.1 Ω/km) agrees with a maker\'s V/A·km table within 4 % from 1.5 to 240 mm² (' + (worst * 100).toFixed(1) + ' %)');
 
+// loads in VA or in W, the breakers of 70 and 90 A, the conventional trip current
+r = C.designCircuit({ ...base, watts: 1000, pf: 0.8, use: 'power' });
+const rVA = C.designCircuit({ ...base, watts: 1000, pf: 0.8, use: 'power', apparent: true });
+ok(near(r.ib, 1000 / (127 * 0.8), 1e-9) && near(rVA.ib, 1000 / 127, 1e-9), 'a load in W is divided by the power factor (1000 W at 0.8: 9.84 A); one in VA is not (7.87 A)');
+ok(near(C.dropOf({ ...base, watts: 1000, pf: 0.8, apparent: true }, 4).volts, 2 * (1000 / 127) * 0.02 * (T.resistance(4, 'pvc') * 0.8 + 0.1 * 0.6), 1e-9), 'the voltage drop still uses the power factor for a load in VA');
+ok(T.BREAKERS.includes(70) && T.BREAKERS.includes(90) && T.BREAKERS.join() === [6, 10, 16, 20, 25, 32, 40, 50, 63, 70, 80, 90, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000].join(), 'the breaker ratings now include 70 and 90 A');
+r = C.designCircuit({ ...base, watts: 8500, phases: 'FN', use: 'power', length: 0 });
+ok(near(r.ib, 8500 / 127, 1e-9) && r.need.breaker === 70 && r.need.section === 16 && near(r.need.iz, 76, 1e-9),
+  '8.5 kW at 127 V: 66.9 A, a 70 A breaker (not 80), 16 mm² (76 A in B1 with two loaded conductors)', JSON.stringify(r.need));
+ok(C.evaluate({ ...base }, 2.5, 16).breakerOk === true && C.evaluate({ ...base, watts: 2400 }, 2.5, 32).breakerOk === false, 'the breaker check holds I_B ≤ I_n ≤ I_Z and 1.45 I_n ≤ 1.45 I_Z');
+
 console.log('== lights and outlets on circuits in a building (IFC4)');
 const build = async () => {
   const text = N.newBuilding({ name: 'Circuits', levels: N.stackLevels(1, 3000, () => 'Ground'), fileName: 'c.ifc', now: new Date('2026-10-24T12:00:00Z') });

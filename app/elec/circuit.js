@@ -4,7 +4,7 @@
  * temperature and grouping corrections and drops no more than the limit, the circuit breaker, the neutral and the protective
  * conductor. DOM-free, no IFC; tables in nbr5410.js.
  *
- *   circuit = { watts, demand (default 1), pf (default 1), phases, system, use ('lighting' | 'power'), length (m; 0 = not known),
+ *   circuit = { watts, apparent (the load is VA, not W: the power factor is not divided by), demand (default 1), pf (default 1), phases, system, use ('lighting' | 'power'), length (m; 0 = not known),
  *     method (a key of METHODS), insulation ('pvc' | 'epr'), ambient (°C; air, or soil for method D), grouped (circuits in the
  *     same conduit or bundle, this one included), arrangement ('' | 'bundle'), spacing (m between buried conduits),
  *     soil (K·m/W, method D), section (mm², chosen; 0 = none yet), breaker (A, chosen; 0 = none yet), dropLimit (% of the
@@ -12,7 +12,8 @@
  *   phases: 'FN' one phase and neutral · 'FF' two phases · '3F' three phases, no neutral · '3FN' three phases and neutral (balanced)
  *   voltsOf(system, phases) → V the circuit is at (phase to neutral for FN, phase to phase for the others)
  *   loadedOf(phases) → loaded conductors, 2 or 3 (the neutral of a balanced three-phase circuit does not count, 6.2.5.6)
- *   designCurrent(circuit) → I_B (A): P · demand / (V · pf), and for three phases P · demand / (√3 · V · pf)
+ *   designCurrent(circuit) → I_B (A): S · demand / V, with S = P / pf for a load in W (S = the load for one in VA); for three phases
+ *     S · demand / (√3 · V)
  *   dropOf(circuit, section) → { volts, percent } | null when the length is not known: ΔV = b · I_B · L · (R cosφ + X sinφ), b = 2
  *     for FN and FF, √3 for three phases; R at the insulation's highest working temperature (so on the safe side), X = 0.1 Ω/km
  *   evaluate(circuit, section, breaker) → what that section and breaker give: I_Z (A), checks
@@ -21,7 +22,7 @@
  *     the smallest breaker from the chosen one up, such that I_B ≤ I_n ≤ I_Z and the drop is within the limit
  *   error: 'temp' | 'group' | 'soil' | 'method' | 'phases' | 'load' (what cannot be looked up) | 'toobig' (no section is enough)
  */
-import { SECTIONS, METHODS, ampacity, tempFactor, soilFactor, groupFactor, minSection, neutralSection, protectiveSection, resistance, REACTANCE, BREAKERS, SYSTEMS, DEFAULT_SYSTEM } from './nbr5410.js';
+import { SECTIONS, METHODS, ampacity, tempFactor, soilFactor, groupFactor, minSection, neutralSection, protectiveSection, resistance, REACTANCE, BREAKERS, TRIP_FACTOR, SYSTEMS, DEFAULT_SYSTEM } from './nbr5410.js';
 
 export const PHASES = ['FN', 'FF', '3F', '3FN'];
 export const voltsOf = (system, phases) => { const s = SYSTEMS[system] || SYSTEMS[DEFAULT_SYSTEM]; return phases === 'FN' ? s.fn : s.ff; };
@@ -30,7 +31,8 @@ const three = (phases) => phases === '3F' || phases === '3FN';
 
 export function designCurrent(c) {
   const v = voltsOf(c.system, c.phases), pf = c.pf > 0 ? c.pf : 1;
-  return ((c.watts || 0) * (c.demand > 0 ? c.demand : 1)) / ((three(c.phases) ? Math.sqrt(3) : 1) * v * pf);
+  const s = ((c.watts || 0) * (c.demand > 0 ? c.demand : 1)) / (c.apparent ? 1 : pf);   // volt-amperes
+  return s / ((three(c.phases) ? Math.sqrt(3) : 1) * v);
 }
 
 export function dropOf(c, section) {
@@ -52,7 +54,8 @@ export function evaluate(c, section, breaker) {
   return {
     section, breaker, iz, base, ib,
     ampacityOk: iz != null && ib <= iz + 1e-9,
-    breakerOk: iz != null && breaker > 0 ? ib <= breaker + 1e-9 && breaker <= iz + 1e-9 : null,
+    // I_B <= I_n <= I_Z, and the current that makes the breaker act (1.45 I_n) at or under 1.45 I_Z
+    breakerOk: iz != null && breaker > 0 ? ib <= breaker + 1e-9 && breaker <= iz + 1e-9 && TRIP_FACTOR * breaker <= TRIP_FACTOR * iz + 1e-9 : null,
     drop, dropOk: drop ? drop.percent <= limit + 1e-9 : null,
     minOk: section + 1e-9 >= minSection(c.use),
   };
