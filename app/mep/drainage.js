@@ -10,17 +10,23 @@
  *   International Plumbing Code 2021 (DFU, inches): Table 710.1(2) horizontal fixture branches 1-1/2: 3, 2: 6, 2-1/2: 12, 3: 20,
  *     4: 160, 5: 360, 6: 620, 8: 1400, 10: 2500, 12: 3900; Table 710.1(1) building drains by slope 1/16 / 1/8 / 1/4 / 1/2 in. per
  *     foot (2: — / — / 21 / 26 … 4: — / 180 / 216 / 250 … 8: 1400 / 1600 / 1920 / 2300).
- *   A drain is never smaller than the fixture drains it serves (a water closet: DN 100 / 3 in.) nor than a drain flowing into it;
- *   under NBR 8160 a building drain ("coletor predial") is DN 100 at least (MAIN_MIN_DN).
+ *   NBR 8160 stacks ("tubos de queda", Tabela 6), by the building's floors (up to three / more than three): DN 40: 4 / 8,
+ *     50: 10 / 24, 75: 30 / 70, 100: 240 / 500, 150: 960 / 1900, 200: 2200 / 3600, 250: 3800 / 5600, 300: 6000 / 8400. The US
+ *     tables have no stack column here: a stack in a US pipe is sized as a branch.
+ *   A drain is never smaller than the fixture drains it serves (a water closet: DN 100 / 3 in.) nor than a drain flowing into it
+ *   (so a stack is never smaller than the largest branch into it); under NBR 8160 a building drain ("coletor predial") is DN 100
+ *   at least (MAIN_MIN_DN).
  *   A size a branch table does not list is looked up in the building-drain table at the run's slope (and the other way round).
  *
- *   drainNetwork(runs, fixtures) → Map(guid → { uhc, dfu, minDn, minIn, up: [guid], down: guid | null, fixtures: [ids] })
+ *   drainNetwork(runs, fixtures) → Map(guid → { uhc, dfu, wc, minDn, minIn, up: [guid], down: guid | null, fixtures: [ids] })
+ *     wc: the water closets it carries (a vent serving them is sized from the other column of NBR 8160 Tabela 8)
  *     runs: [{ guid, verts (world mm, in the way it flows: first point upstream), od }]; fixtures: [{ id, p (world mm), size,
  *     kind (mep/fixtures.js) }] — the drain connectors of plumbing fixtures. A run flows into the run its last point lies on; a
  *     fixture drains into the run that passes through its connector.
- *   capacity(std, nominal, slope, role) → fixture units, or 0 when the size does not carry any at that slope
- *   smallestSize(std, sizes, units, { slope, role, floor }) → the first of `sizes` ([{ key, nominal }], smallest first) that
- *     carries `units` and is at least `floor`, or null
+ *   capacity(std, nominal, slope, role, floors) → fixture units, or 0 when the size does not carry any at that slope; role
+ *     branch | main | stack, floors = the building's (a stack's column of Tabela 6)
+ *   smallestSize(std, sizes, units, { slope, role, floor, floors }) → the first of `sizes` ([{ key, nominal }], smallest first)
+ *     that carries `units` and is at least `floor`, or null
  *   upstreamFirst(net) → guids, each after the runs flowing into it
  */
 import { FIXTURES } from './fixtures.js';
@@ -34,20 +40,24 @@ const IPC_MAIN = {
   1.25: [0, 0, 1, 1], 1.5: [0, 0, 3, 3], 2: [0, 0, 21, 26], 2.5: [0, 0, 24, 31], 3: [0, 36, 42, 50], 4: [0, 180, 216, 250], 5: [0, 390, 480, 575],
   6: [0, 700, 840, 1000], 8: [1400, 1600, 1920, 2300], 10: [2500, 2900, 3500, 4200], 12: [3900, 4600, 5600, 6700],
 };
+// DN: [prédio de até três pavimentos, prédio com mais de três pavimentos]  — NBR 8160 Tabela 6
+const NBR_STACK = { 40: [4, 8], 50: [10, 24], 75: [30, 70], 100: [240, 500], 150: [960, 1900], 200: [2200, 3600], 250: [3800, 5600], 300: [6000, 8400] };
 export const MAIN_MIN_DN = 100;   // NBR 8160: the building drain's smallest DN
-export const DRAIN_TABLES = { br: { branch: NBR_BRANCH, main: NBR_MAIN, slopes: NBR_MAIN_SLOPES }, us: { branch: IPC_BRANCH, main: IPC_MAIN, slopes: IPC_MAIN_SLOPES } };
+export const DRAIN_TABLES = { br: { branch: NBR_BRANCH, main: NBR_MAIN, slopes: NBR_MAIN_SLOPES, stack: NBR_STACK }, us: { branch: IPC_BRANCH, main: IPC_MAIN, slopes: IPC_MAIN_SLOPES } };
 
-/** Fixture units a size carries: a branch from the branch table (else the main table), a building drain the other way round. */
-export function capacity(std, nominal, slope, role = 'branch') {
+/** Fixture units a size carries: a branch from the branch table (else the main table), a building drain the other way round, a
+ *  stack from the stack table by the building's floors (a US stack as a branch). */
+export function capacity(std, nominal, slope, role = 'branch', floors = 1) {
   const T = DRAIN_TABLES[std];
   if (!T) return 0;
+  if (role === 'stack' && T.stack) return T.stack[nominal]?.[floors > 3 ? 1 : 0] || 0;
   const col = T.slopes.reduce((c, s, i) => (slope + 1e-9 >= s ? i : c), -1);
   const main = col >= 0 ? T.main[nominal]?.[col] || 0 : 0, branch = T.branch[nominal] || 0;
   return role === 'main' ? main || branch : branch || main;
 }
 
-export function smallestSize(std, sizes, units, { slope = 0, role = 'branch', floor = 0 } = {}) {
-  for (const s of sizes) if (s.nominal + 1e-9 >= floor && capacity(std, s.nominal, slope, role) >= units) return s;
+export function smallestSize(std, sizes, units, { slope = 0, role = 'branch', floor = 0, floors = 1 } = {}) {
+  for (const s of sizes) if (s.nominal + 1e-9 >= floor && capacity(std, s.nominal, slope, role, floors) >= units) return s;
   return null;
 }
 
@@ -66,7 +76,7 @@ function offLine(verts, p) {
 
 export function drainNetwork(runs, fixtures) {
   const tol = (r) => Math.max(5, (r.od || 0) / 2);
-  const out = new Map(runs.map((r) => [r.guid, { uhc: 0, dfu: 0, minDn: 0, minIn: 0, up: [], down: null, fixtures: [] }]));
+  const out = new Map(runs.map((r) => [r.guid, { uhc: 0, dfu: 0, wc: 0, minDn: 0, minIn: 0, up: [], down: null, fixtures: [] }]));
   // where each run flows: the other run its last point lies on (the nearest)
   for (const r of runs) {
     const end = r.verts[r.verts.length - 1];
@@ -87,14 +97,14 @@ export function drainNetwork(runs, fixtures) {
     if (best) own.get(best.r.guid).push(f);
   }
   // totals: a run's own fixtures and everything flowing into it (a loop is counted once)
-  const done = new Set(), busy = new Set(), NONE = { uhc: 0, dfu: 0, minDn: 0, minIn: 0 };
+  const done = new Set(), busy = new Set(), NONE = { uhc: 0, dfu: 0, wc: 0, minDn: 0, minIn: 0 };
   const total = (g) => {
     const n = out.get(g);
     if (busy.has(g)) return NONE;   // back round a loop: already being counted
     if (done.has(g)) return n;
     busy.add(g);
-    for (const f of own.get(g)) { const k = FIXTURES[f.kind]; n.uhc += k.uhc; n.dfu += k.dfu; n.minDn = Math.max(n.minDn, k.dnMin); n.minIn = Math.max(n.minIn, k.trapIn); n.fixtures.push(f.id); }
-    for (const u of n.up) { const m = total(u); n.uhc += m.uhc; n.dfu += m.dfu; n.minDn = Math.max(n.minDn, m.minDn); n.minIn = Math.max(n.minIn, m.minIn); }
+    for (const f of own.get(g)) { const k = FIXTURES[f.kind]; n.uhc += k.uhc; n.dfu += k.dfu; n.wc += f.kind === 'wc' ? 1 : 0; n.minDn = Math.max(n.minDn, k.dnMin); n.minIn = Math.max(n.minIn, k.trapIn); n.fixtures.push(f.id); }
+    for (const u of n.up) { const m = total(u); n.uhc += m.uhc; n.dfu += m.dfu; n.wc += m.wc; n.minDn = Math.max(n.minDn, m.minDn); n.minIn = Math.max(n.minIn, m.minIn); }
     busy.delete(g); done.add(g);
     return n;
   };

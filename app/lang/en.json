@@ -4311,6 +4311,38 @@
     "other": "{n} drains carry more fixture units than their largest size can: use a steeper slope or another pipe."
   },
   "mep.slope.under": "Flatter than the plumbing code's minimum for this size ({min})",
+  "mep.role.stack": "Stack",
+  "mep.floors": "Building",
+  "mep.floors.auto": {
+    "one": "As the model: {n} floor",
+    "other": "As the model: {n} floors"
+  },
+  "mep.floors.upto3": "Up to three floors",
+  "mep.floors.more": "More than three floors",
+  "mep.trap": "Trap to vent",
+  "mep.trap.ok": "{d} to a vent, at most {max} for DN{dn} (NBR 8160)",
+  "mep.trap.over": "{d} to a vent: more than {max} for DN{dn} (NBR 8160)",
+  "mep.trap.free": "{d} to a vent",
+  "mep.trap.none": "Reaches no vent or stack: NBR 8160 asks for one within {max}.",
+  "mep.vrole": "Vent",
+  "mep.vrole.branch": "Branch vent",
+  "mep.vrole.main": "Vent stack or header",
+  "mep.vfu": "Vents",
+  "mep.vfu.text": "{n} UHC: needs {size} at least (NBR 8160)",
+  "mep.vfu.wc": "{n} UHC with a water closet: needs {size} at least (NBR 8160)",
+  "mep.vfu.stack": "{n} UHC on a DN{dn} drain, {len} to the open end: needs {size} at least (NBR 8160)",
+  "mep.vfu.alone": "It vents no sanitary drain: start it on the drain it vents.",
+  "mep.vfu.toobig": "{n} UHC: more than NBR 8160 gives a vent like this one (a branch vent: make it a vent stack; a vent stack: shorten it).",
+  "mep.sizevents": "Size the vents",
+  "mep.sizevents.label": {
+    "one": "{n} vent sized by what it vents",
+    "other": "{n} vents sized by what they vent"
+  },
+  "mep.sizevents.none": "Every vent is already big enough for what it vents.",
+  "mep.sizevents.big": {
+    "one": "{n} vent vents more than NBR 8160 gives it: see its Properties.",
+    "other": "{n} vents vent more than NBR 8160 gives them: see their Properties."
+  },
   "mep.shape": "Shape",
   "mep.diameter": "Diameter",
   "mep.width": "Width",

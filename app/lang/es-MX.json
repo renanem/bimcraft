@@ -4439,6 +4439,38 @@
     "other": "{n} desagües llevan más unidades de descarga de las que admite su tamaño mayor: use más pendiente u otra tubería."
   },
   "mep.slope.under": "Más plana que el mínimo del código de plomería para este tamaño ({min})",
+  "mep.role.stack": "Bajante",
+  "mep.floors": "Edificio",
+  "mep.floors.auto": {
+    "one": "Como el modelo: {n} piso",
+    "other": "Como el modelo: {n} pisos"
+  },
+  "mep.floors.upto3": "Hasta tres pisos",
+  "mep.floors.more": "Más de tres pisos",
+  "mep.trap": "Sifón a ventilación",
+  "mep.trap.ok": "{d} hasta una ventilación, como máximo {max} para DN{dn} (NBR 8160)",
+  "mep.trap.over": "{d} hasta una ventilación: más de {max} para DN{dn} (NBR 8160)",
+  "mep.trap.free": "{d} hasta una ventilación",
+  "mep.trap.none": "No llega a ninguna ventilación ni bajante: la NBR 8160 pide una a menos de {max}.",
+  "mep.vrole": "Ventilación",
+  "mep.vrole.branch": "Ramal de ventilación",
+  "mep.vrole.main": "Columna o colector de ventilación",
+  "mep.vfu": "Ventila",
+  "mep.vfu.text": "{n} UHC: necesita {size} como mínimo (NBR 8160)",
+  "mep.vfu.wc": "{n} UHC con un inodoro: necesita {size} como mínimo (NBR 8160)",
+  "mep.vfu.stack": "{n} UHC en un desagüe DN{dn}, {len} hasta el extremo abierto: necesita {size} como mínimo (NBR 8160)",
+  "mep.vfu.alone": "No ventila ningún desagüe sanitario: comiéncela en el desagüe que ventila.",
+  "mep.vfu.toobig": "{n} UHC: más de lo que la NBR 8160 da a una ventilación como esta (un ramal: hágalo columna; una columna: acórtela).",
+  "mep.sizevents": "Dimensionar las ventilaciones",
+  "mep.sizevents.label": {
+    "one": "{n} ventilación dimensionada por lo que ventila",
+    "other": "{n} ventilaciones dimensionadas por lo que ventilan"
+  },
+  "mep.sizevents.none": "Todas las ventilaciones ya son suficientes para lo que ventilan.",
+  "mep.sizevents.big": {
+    "one": "{n} ventilación ventila más de lo que le da la NBR 8160: vea sus Propiedades.",
+    "other": "{n} ventilaciones ventilan más de lo que les da la NBR 8160: vea sus Propiedades."
+  },
   "mep.shape": "Forma",
   "mep.diameter": "Diámetro",
   "mep.width": "Ancho",

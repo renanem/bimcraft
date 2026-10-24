@@ -15,10 +15,13 @@
  * Plans: pipes under 150 mm as one line, larger pipes and ducts as two, in their system's colour; rises and drops marked;
  * size and system labels; a drain's fall. Runs show on every level their height range reaches (the plan's view range).
  * Properties edit a run; Delete removes it. A sanitary run shows the fixture units it carries and the size they need (NBR 8160
- * UHC for the Brazilian pipes, IPC DFU for the others), whether it is a branch or a building drain, and Size the drains. Schedules: pipes, ducts, fittings and valves. The TakeoffCraft hand-off (res-ui.js
+ * UHC for the Brazilian pipes, IPC DFU for the others), whether it is a branch or a building drain (or, in Brazilian pipe, a stack,
+ * with the building's floors), how far its traps are from a vent, and Size the drains. A vent in Brazilian pipe shows what it vents
+ * and the size NBR 8160 gives it (branch vent or vent stack), and Size the vents. Schedules: pipes, ducts, fittings and valves. The TakeoffCraft hand-off (res-ui.js
  * makeTakeoff) gets them through `takeoffExtra`. Test hook: window.bimcraftMep = { state, api }.
  */
 import { readRuns, placeRun, changeRun, removeRuns, addValve, removeValve, mepLayout, sectionOf, runVertices, runDefaults, drainMinimum, along, runLength, readFixturePorts, drainPlan, sizeDrains,
+  ventPlan, sizeVents, trapPlan, buildingFloors,
   PIPE_SYSTEMS, DUCT_SYSTEMS, VALVE_KINDS, DUCT_SHAPES, systemLabel, pipeForFlow, ductForFlow, ductLoss, runSchedules } from './mep-model.js';
 import { MATERIALS, CLASSES, DEFAULT_CLASS, sizesFor, pipeSize, standardOf, BR_MAX_VELOCITY } from './mep/pipes.js';
 import { ModelWriter } from './model-write.js';
@@ -378,6 +381,7 @@ export function mountMep(modelUi) {
       const min = drainMinimum(r);
       if (min !== null) kit.rows.push(el('dt', {}, ''), el('dd', { className: r.slope + 1e-9 < min ? 'bc-input-err' : 'bc-muted', 'data-mp-mepmin': '' }, t(r.slope + 1e-9 < min ? 'mep.slope.under' : 'mep.slope.min', { min: fmtSlope(min, A.units()) })));
       if (r.system === 'san') drainRows(r, kit, run);
+      if (r.system === 'vent' && standardOf(r.mat) === 'br') ventRows(r, kit, run);
     } else {
       kit.field(t('mep.shape'), kit.select(DUCT_SHAPES.map((s) => [s, t('mep.shape.' + s)]), r.shape, 'data-mp-mepshape', (v) => run({ shape: v, h: v === 'round' ? r.w : (v === 'oval' && !(r.w > r.h) ? r.w / 2 : r.h) })));
       kit.field(t(r.shape === 'round' ? 'mep.diameter' : 'mep.width'), kit.lenInput(r.w, 'data-mp-mepw', (mm) => run({ w: mm, ...(r.shape === 'round' ? { h: mm } : {}) }), { min: 50 }));
@@ -392,7 +396,7 @@ export function mountMep(modelUi) {
     const z0 = r.points[0][2];
     kit.field(t('mep.z'), kit.lenInput(z0, 'data-mp-mepz', (mm) => run({ points: r.points.map((q) => [q[0], q[1], q[2] + (mm - z0)]) }), { any: true }));
     kit.rows.push(el('dt', {}, t('mep.length')), el('dd', { 'data-mp-meplen': '' }, L(runLength(r)) + ' · ' + t('mep.parts', { n: r.parts.length })));
-    if (r.kind === 'pipe' && r.system !== 'san' && r.flow >= 0) {
+    if (r.kind === 'pipe' && r.system !== 'san' && r.system !== 'vent' && r.flow >= 0) {
       const fb = el('input', { type: 'text', className: 'bc-input bc-num', value: r.flow ? String(r.flow) : '', 'data-mp-mepgpm': '', size: 6 });
       const go = kit.button(t('mep.sizeit'), 'data-mp-mepsizeit', () => {
         const q = Number(fb.value.replace(',', '.'));
@@ -410,16 +414,49 @@ export function mountMep(modelUi) {
     return { title: t(r.kind === 'duct' ? 'mep.run.duct' : 'mep.run.pipe') + ' ' + sizeLabel(r.sec) + ' ' + systemLabel(r.kind, r.system) };
   }
 
-  /** A sanitary run: branch or building drain, the fixture units it carries and the size they need, Size the drains. */
+  /** A sanitary run: branch, building drain or (Brazilian pipe) stack, the fixture units it carries and the size they need, Size
+   *  the drains; a stack's building floors; how far the traps on it are from a vent (NBR 8160). */
   function drainRows(r, kit, run) {
-    kit.field(t('mep.role'), kit.select([['branch', t('mep.role.branch')], ['main', t('mep.role.main')]], r.role, 'data-mp-meprole', (v) => run({ role: v })));
-    let q = null;
-    try { q = drainPlan(W()).get(r.guid); } catch (e) { console.error(e); }
     const std = standardOf(r.mat), unit = t('mep.fu.' + std);
+    const roles = [['branch', t('mep.role.branch')], ['main', t('mep.role.main')], ...(std === 'br' || r.role === 'stack' ? [['stack', t('mep.role.stack')]] : [])];
+    kit.field(t('mep.role'), kit.select(roles, r.role, 'data-mp-meprole', (v) => run({ role: v })));
+    let q = null, trap = null;
+    try { const w = W(); q = drainPlan(w).get(r.guid); trap = trapPlan(w).get(r.guid); } catch (e) { console.error(e); }
+    if (r.role === 'stack' && std === 'br') {
+      let n = 1;
+      try { n = buildingFloors(W()); } catch (e) { /* one */ }
+      kit.field(t('mep.floors'), kit.select([['', t('mep.floors.auto', { n })], ['upto3', t('mep.floors.upto3')], ['more', t('mep.floors.more')]], r.floors || '', 'data-mp-mepfloors', (v) => run({ floors: v })));
+    }
     const text = !q || (!q.units && !q.floor) ? t('mep.fu.none') : q.toobig ? t('mep.fu.toobig', { n: q.units, unit })
       : t('mep.fu.text', { n: q.units, unit, size: sizeName(r.mat, r.cls, q.need), code: t('mep.fu.code.' + std) });
     kit.rows.push(el('dt', {}, t('mep.fu')), el('dd', { className: q?.grow || q?.toobig ? 'bc-input-err' : 'bc-muted', 'data-mp-mepfu': '' }, text));
+    if (trap) {
+      const d = L(trap.mm), max = trap.limit !== null ? L(trap.limit) : null;
+      const tt = !trap.vented ? t('mep.trap.none', { max: max || L(2400) }) : max === null ? t('mep.trap.free', { d }) : t(trap.over ? 'mep.trap.over' : 'mep.trap.ok', { d, max, dn: trap.dn });
+      kit.rows.push(el('dt', {}, t('mep.trap')), el('dd', { className: trap.over ? 'bc-input-err' : 'bc-muted', 'data-mp-meptrap': '' }, tt));
+    }
     kit.field('', kit.button(t('mep.sizedrains'), 'data-mp-mepsizedrains', () => sizeAll()));
+  }
+  /** A vent in Brazilian pipe: branch vent or vent stack / header, what it vents and the size NBR 8160 gives it, Size the vents. */
+  function ventRows(r, kit, run) {
+    kit.field(t('mep.vrole'), kit.select([['branch', t('mep.vrole.branch')], ['main', t('mep.vrole.main')]], r.role === 'main' ? 'main' : 'branch', 'data-mp-mepvrole', (v) => run({ role: v })));
+    let q = null;
+    try { q = ventPlan(W()).get(r.guid); } catch (e) { console.error(e); }
+    if (!q) return;
+    const size = q.need ? sizeName(r.mat, r.cls, q.need) : '';
+    const text = q.alone ? t('mep.vfu.alone') : q.toobig ? t('mep.vfu.toobig', { n: q.units })
+      : q.role === 'main' ? t('mep.vfu.stack', { n: q.units, dn: q.stackDn, len: L(q.length), size }) : t(q.wc ? 'mep.vfu.wc' : 'mep.vfu.text', { n: q.units, size });
+    kit.rows.push(el('dt', {}, t('mep.vfu')), el('dd', { className: q.grow || q.toobig ? 'bc-input-err' : 'bc-muted', 'data-mp-mepvfu': '' }, text));
+    kit.field('', kit.button(t('mep.sizevents'), 'data-mp-mepsizevents', () => sizeAllVents()));
+  }
+  /** Every vent too small for what it vents made the size NBR 8160 gives it (one undo step). */
+  function sizeAllVents() {
+    let plan;
+    try { plan = [...ventPlan(W()).values()]; } catch (e) { console.error(e); return; }
+    const grow = plan.filter((q) => q.grow).length, big = plan.filter((q) => q.toobig).length;
+    if (!grow) { A.host.status(big ? t('mep.sizevents.big', { n: big }) : t('mep.sizevents.none'), !!big); return; }
+    A.commit(sizeVents(), { label: t('mep.sizevents.label', { n: grow }), verb: t('model.verb.changed') });
+    if (big) A.host.status(t('mep.sizevents.big', { n: big }), true);
   }
   /** Every sanitary run too small for its fixture units made the size they need (one undo step). */
   function sizeAll() {

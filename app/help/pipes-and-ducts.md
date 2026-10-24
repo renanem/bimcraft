@@ -3,7 +3,7 @@ title: Pipes and ducts
 summary: Draw pipe and duct runs on the plan by their centre lines; the elbows, tees, reducers and transitions are made for you, the runs belong to systems with connected ports in the IFC file, and they show in plans, schedules and the takeoff.
 section: tasks
 order: 36
-keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
+keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
 ---
 
 ## What you'll do
@@ -75,7 +75,26 @@ Pick a sanitary drain: **Fixture units** in Properties says how many it carries 
 {{ui:Size the drains}} makes every sanitary drain of the model that is too small for its fixture units the size it needs, as one step you can undo. A drain drawn bigger than it needs is left as it is. When a drain carries more than the largest size of its pipe can at its slope, BimCraft says so: give it a steeper slope or another pipe.
 
 :::note
-The tables are those of horizontal drains. Stacks, vents and storm drains are not sized here: check them, and the whole design, against the code that applies to the project.
+In the US tables, stacks are sized as branches and vents are not sized; storm drains are not sized in either. Check them, and the whole design, against the code that applies to the project.
+:::
+
+## Stacks and vents (NBR 8160)
+
+In Brazilian PVC drain pipe, stacks and vents are sized too.
+
+**Stacks.** Draw the stack from its top down, ending on the drain it flows into, and set its **Drain** to **Stack**. The branches end on its line. **Fixture units** then uses the stack table of NBR 8160, whose column depends on the building: **Building** says up to three floors or more than three, and starts from the number of levels in the model. A stack is never smaller than the largest drain flowing into it, so one with a water closet is DN 100. A stack that bends more than 45° from the vertical is sized in parts: draw it as separate runs.
+
+**Vents.** Draw each vent from the drain it vents, its first point on that drain, and on up or along: a vent ending on another vent goes into it, and one ending on a stack goes into the stack's vent above. Pick a vent and set **Vent**:
+
+- **Branch vent**: sized by the UHC of the drain it vents, from the table of NBR 8160 for branch vents, which has a column for groups with a water closet.
+- **Vent stack or header**: sized by the DN of the drain or stack it serves, its UHC and its length, from the vent stack table. The length runs from the foot of the farthest vent into it to the open end, up the stack's vent when it joins one.
+
+A vent's UHC are those of the drains it and the vents into it vent, each counted once. {{ui:Size the vents}} makes every vent that is too small the size it needs, as one step you can undo.
+
+**Trap to vent.** A sanitary drain with fixtures on it shows how far, along the drains, the farthest fixture's drain connector is from a vent: the foot of the first vent downstream, or a stack. NBR 8160 allows 1.00 m for DN 40, 1.20 m for DN 50, 1.80 m for DN 75 and 2.40 m for DN 100; a longer one is shown in red.
+
+:::note
+A vent should rise at least 1 % towards the open end; BimCraft draws vents level unless you give the corners their heights.
 :::
 
 ## Valves
