@@ -21,7 +21,7 @@
  * makeTakeoff) gets them through `takeoffExtra`. Test hook: window.bimcraftMep = { state, api }.
  */
 import { readRuns, placeRun, changeRun, removeRuns, addValve, removeValve, mepLayout, sectionOf, runVertices, runDefaults, drainMinimum, along, runLength, readFixturePorts, drainPlan, sizeDrains,
-  ventPlan, sizeVents, trapPlan, buildingFloors,
+  ventPlan, sizeVents, trapPlan, buildingFloors, waterPlan, sizeWater, waterGrowth,
   PIPE_SYSTEMS, DUCT_SYSTEMS, VALVE_KINDS, DUCT_SHAPES, systemLabel, pipeForFlow, ductForFlow, ductLoss, runSchedules } from './mep-model.js';
 import { MATERIALS, CLASSES, DEFAULT_CLASS, sizesFor, pipeSize, standardOf, BR_MAX_VELOCITY } from './mep/pipes.js';
 import { ModelWriter } from './model-write.js';
@@ -371,6 +371,7 @@ export function mountMep(modelUi) {
     const meta = { label: t(r.kind === 'duct' ? 'mep.run.duct' : 'mep.run.pipe'), verb: t('model.verb.changed'), reselect: partKeys(r.guid) };
     const run = (ch) => A.commit(changeRun(r.guid, ch), meta);
     kit.field(t('mep.system'), kit.select(sysList(r.kind), r.system, 'data-mp-mepsys', (v) => run(r.kind === 'pipe' ? { system: v, slope: r.slope || (PIPE_SYSTEMS[v]?.drain ? drainMinimum({ ...r, system: v }) || 0 : 0) } : { system: v })));
+    let fed = false;
     if (r.kind === 'pipe') {
       kit.field(t('mep.material'), kit.select(MATERIALS.map((m) => [m, t('mep.mat.' + m)]), r.mat, 'data-mp-mepmat', (v) => { const c = DEFAULT_CLASS[v], s = sizesFor(v, c); run({ mat: v, cls: c, size: s.includes(r.size) ? r.size : s[0] }); }));
       kit.field(t('mep.class'), kit.select(CLASSES[r.mat].map((c) => [c, t('mep.cls.' + r.mat, { c })]), r.cls, 'data-mp-mepcls', (v) => { const s = sizesFor(r.mat, v); run({ cls: v, size: s.includes(r.size) ? r.size : s[0] }); }));
@@ -382,6 +383,7 @@ export function mountMep(modelUi) {
       if (min !== null) kit.rows.push(el('dt', {}, ''), el('dd', { className: r.slope + 1e-9 < min ? 'bc-input-err' : 'bc-muted', 'data-mp-mepmin': '' }, t(r.slope + 1e-9 < min ? 'mep.slope.under' : 'mep.slope.min', { min: fmtSlope(min, A.units()) })));
       if (r.system === 'san') drainRows(r, kit, run);
       if (r.system === 'vent' && standardOf(r.mat) === 'br') ventRows(r, kit, run);
+      if (r.system === 'cw' || r.system === 'hw') fed = waterRows(r, kit, run);
     } else {
       kit.field(t('mep.shape'), kit.select(DUCT_SHAPES.map((s) => [s, t('mep.shape.' + s)]), r.shape, 'data-mp-mepshape', (v) => run({ shape: v, h: v === 'round' ? r.w : (v === 'oval' && !(r.w > r.h) ? r.w / 2 : r.h) })));
       kit.field(t(r.shape === 'round' ? 'mep.diameter' : 'mep.width'), kit.lenInput(r.w, 'data-mp-mepw', (mm) => run({ w: mm, ...(r.shape === 'round' ? { h: mm } : {}) }), { min: 50 }));
@@ -396,7 +398,8 @@ export function mountMep(modelUi) {
     const z0 = r.points[0][2];
     kit.field(t('mep.z'), kit.lenInput(z0, 'data-mp-mepz', (mm) => run({ points: r.points.map((q) => [q[0], q[1], q[2] + (mm - z0)]) }), { any: true }));
     kit.rows.push(el('dt', {}, t('mep.length')), el('dd', { 'data-mp-meplen': '' }, L(runLength(r)) + ' · ' + t('mep.parts', { n: r.parts.length })));
-    if (r.kind === 'pipe' && r.system !== 'san' && r.system !== 'vent' && r.flow >= 0) {
+    // a pipe in a network fed from a tank has its flow from the fixtures: no flow typed by hand
+    if (r.kind === 'pipe' && r.system !== 'san' && r.system !== 'vent' && !fed && r.flow >= 0) {
       const fb = el('input', { type: 'text', className: 'bc-input bc-num', value: r.flow ? String(r.flow) : '', 'data-mp-mepgpm': '', size: 6 });
       const go = kit.button(t('mep.sizeit'), 'data-mp-mepsizeit', () => {
         const q = Number(fb.value.replace(',', '.'));
@@ -448,6 +451,35 @@ export function mountMep(modelUi) {
       : q.role === 'main' ? t('mep.vfu.stack', { n: q.units, dn: q.stackDn, len: L(q.length), size }) : t(q.wc ? 'mep.vfu.wc' : 'mep.vfu.text', { n: q.units, size });
     kit.rows.push(el('dt', {}, t('mep.vfu')), el('dd', { className: q.grow || q.toobig ? 'bc-input-err' : 'bc-muted', 'data-mp-mepvfu': '' }, text));
     kit.field('', kit.button(t('mep.sizevents'), 'data-mp-mepsizevents', () => sizeAllVents()));
+  }
+  /** Cold or hot water: fed from a tank (the method of the design flows the project declares, the water level) or from another
+   *  pipe; its flow, speed and head loss, its pressures and its fixtures' (NBR 5626:2020); Size the water pipes. */
+  function waterRows(r, kit, run) {
+    const kpa = (v, d = 1) => v.toFixed(d) + ' kPa';   // i18n-ignore: unit
+    const num = (v, d) => v.toFixed(d);
+    kit.field(t('mep.wsrc'), kit.select([['', t('mep.wsrc.pipe')], ['weights', t('mep.wsrc.weights')], ['sum', t('mep.wsrc.sum')]], r.water || '', 'data-mp-mepwsrc', (v) => run({ water: v, level: r.level || (r.points[0][2] + 1000) })));
+    if (r.water) kit.field(t('mep.wlevel'), kit.lenInput(r.level, 'data-mp-mepwlevel', (mm) => run({ level: mm }), { any: true }));
+    let plan = null;
+    try { plan = waterPlan(W()); } catch (e) { console.error(e); }
+    if (!plan) return false;
+    const q = plan.runs.get(r.guid);
+    if (!q) { kit.rows.push(el('dt', {}, t('mep.wflow')), el('dd', { className: 'bc-muted', 'data-mp-mepwflow': '' }, t('mep.wunfed'))); return false; }
+    const first = q.pieces.find((p) => p.q > 0) || q.pieces[0];
+    if (first) kit.rows.push(el('dt', {}, t('mep.wflow')), el('dd', { className: q.vMax > 3 + 1e-9 ? 'bc-input-err' : 'bc-muted', 'data-mp-mepwflow': '' },
+      t('mep.wflow.text', { q: num(first.q, 2), v: num(first.v, 2), j: kpa(first.j * 9.81, 2) }) + (q.vMax > 3 + 1e-9 ? ' ' + t('mep.wfast', { v: num(q.vMax, 2) }) : '')));
+    if (q.pMin !== null) kit.rows.push(el('dt', {}, t('mep.wpress')), el('dd', { className: q.pMin < 5 - 1e-9 ? 'bc-input-err' : 'bc-muted', 'data-mp-mepwpress': '' }, t(q.pMin < 5 - 1e-9 ? 'mep.wpress.low' : 'mep.wpress.text', { min: kpa(q.pMin), end: kpa(q.pEnd) })));
+    for (const f of [...plan.fixtures.values()].filter((x) => x.run === r.guid)) {
+      const bad = !f.ok;
+      kit.rows.push(el('dt', {}, t('fam.fixture.' + f.kind)), el('dd', { className: bad ? 'bc-input-err' : 'bc-muted', 'data-mp-mepwfix': f.kind }, t(bad ? 'mep.wfix.bad' : 'mep.wfix.text', { p: kpa(f.p), s: kpa(f.static) })));
+    }
+    if (!q.localLosses) kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-muted', 'data-mp-mepwlocal': '' }, t('mep.wlocal')));
+    kit.field('', kit.button(t('mep.sizewater'), 'data-mp-mepsizewater', () => {
+      let n = 0;
+      try { n = waterGrowth(W()).size; } catch (e) { console.error(e); return; }
+      if (!n) { A.host.status(t('mep.sizewater.none')); return; }
+      A.commit(sizeWater(), { label: t('mep.sizewater.label', { n }), verb: t('model.verb.changed') });
+    }));
+    return true;
   }
   /** Every vent too small for what it vents made the size NBR 8160 gives it (one undo step). */
   function sizeAllVents() {

@@ -57,7 +57,8 @@ import { pipeSize, bendRadius, drainSlope, DEFAULT_CLASS, sizesFor, SYSTEM_MATER
 import { sizeSection, sectionLoss } from './mep/sizing.js';
 import { CONNECTOR_PSET } from './family-model.js';
 import { drainNetwork, smallestSize, upstreamFirst, MAIN_MIN_DN } from './mep/drainage.js';
-import { ventNetwork, branchVentSize, ventStackSize, trapDistance } from './mep/vents.js';
+import { ventNetwork, branchVentSize, ventStackSize, trapDistance, alongLine } from './mep/vents.js';
+import { waterNetwork, MAX_SPEED } from './mep/water.js';
 
 export const RUN_PSET = 'CadCraft_MepRun';
 const SYS_PSET = 'CadCraft_MepSystem';
@@ -304,6 +305,7 @@ export function readRuns(w) {
       points: points.map((q) => [q[0], q[1], q[2] || 0]), mat: String(ps.Material || ''), cls: String(ps.Class || ''), size: String(ps.Size || ''),
       shape: DUCT_SHAPES.includes(ps.Shape) ? ps.Shape : 'rect', w: mmOf(w, ps.Width), h: mmOf(w, ps.Height), slope: Number(ps.Slope) || 0, flow: Number(ps.Flow) || 0,
       role: ps.DrainRole === 'main' || ps.DrainRole === 'stack' ? ps.DrainRole : 'branch', floors: ps.Floors === 'upto3' || ps.Floors === 'more' ? ps.Floors : '',
+      water: ps.Water === 'weights' || ps.Water === 'sum' ? ps.Water : '', level: mmOf(w, ps.WaterLevel),
       valves: Array.isArray(valves) ? valves.filter((v) => v && Number.isFinite(v.s) && VALVE_KINDS[v.kind]).map((v) => ({ s: v.s, kind: v.kind })) : [],
       parts: aggKids(w, id),
     });
@@ -321,7 +323,8 @@ function writeDef(w, id, r) {
     ['Material', 'IFCLABEL', r.mat || ''], ['Class', 'IFCLABEL', r.cls || ''], ['Size', 'IFCLABEL', r.size || ''], ['Shape', 'IFCLABEL', r.kind === 'duct' ? r.shape : ''],
     Lm('Width', r.kind === 'duct' ? r.w : 0), Lm('Height', r.kind === 'duct' ? r.h : 0), ['Slope', 'IFCREAL', round(r.slope || 0, 9)], ['Flow', 'IFCREAL', round(r.flow || 0, 6)],
     ['Valves', 'IFCTEXT', JSON.stringify((r.valves || []).map((v) => ({ s: round(v.s, 3), kind: v.kind })))], ['DrainRole', 'IFCLABEL', r.role === 'main' || r.role === 'stack' ? r.role : 'branch'],
-    ['Floors', 'IFCLABEL', r.floors === 'upto3' || r.floors === 'more' ? r.floors : '']]);
+    ['Floors', 'IFCLABEL', r.floors === 'upto3' || r.floors === 'more' ? r.floors : ''],
+    ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0)]);
 }
 /** Plane angles in the file's own unit (radians unless the project says degrees). */
 function angleUnit(w) {
@@ -854,6 +857,68 @@ export function sizeDrains() {
       const r = runs.get(q.guid), next = { ...r, size: q.need };
       writeDef(w, r.id, next);
       relabel(w, r.id, next);
+      storeys.add(r.storey);
+    }
+    for (const st of storeys) regenMep(w, st);
+    return { id: null, ids: [] };
+  });
+}
+
+// ---- cold and hot water (NBR 5626:2020) ----
+/** Roughness (mm) for the head loss: plastic and copper drawn smooth, steel commercial. */
+const ROUGH_MM = { 'pvc-sold': 0.0015, pvc: 0.0015, copper: 0.0015, pex: 0.007, steel: 0.045 };
+/** Each cold and each hot water network from its tank: Map(guid → run result of mep/water.js, with its system) and the fixtures'
+ *  pressures (Map(port id → …)); runs not fed from a tank are in `unfed`. */
+export function waterPlan(w) {
+  const cache = new Map(), all = readRuns(w).filter((r) => r.kind === 'pipe' && (r.system === 'cw' || r.system === 'hw'));
+  const ports = readFixturePorts(w).filter((q) => q.domain === 'pipe' && (q.system === 'cw' || q.system === 'hw') && q.flow === 'in' && q.fixture);
+  const lays = new Map();
+  const partsOf = (r) => {
+    if (!lays.has(r.storey)) lays.set(r.storey, mepLayout(readRuns(w).filter((x) => x.storey === r.storey).map((x) => ({ ...x, sec: sectionOf(x), verts: runVertices(x) }))));
+    return lays.get(r.storey).runs?.get(r.guid)?.parts || [];
+  };
+  const runs = new Map(), fixtures = new Map(), unfed = new Set();
+  for (const sys of ['cw', 'hw']) {
+    const list = all.filter((r) => r.system === sys).map((r) => ({ r, sec: sectionOf(r) })).filter((x) => x.sec).map(({ r, sec }) => {
+      const local = runVertices(r), at = (p) => alongLine(local, p).s;
+      const fittings = [];
+      for (const p of partsOf(r)) {
+        if (p.kind === 'bend') fittings.push({ s: at(p.p0), kind: p.th * 180 / Math.PI <= 60 ? 'elbow45' : 'elbow90' });
+        else if (p.kind === 'tee') fittings.push({ s: at(p.at), kind: 'teeThrough' });
+        else if (p.kind === 'valve') fittings.push({ s: at(p.a), kind: p.valve.kind });
+      }
+      const world = worldOf(w, r.storey, cache);
+      return { guid: r.guid, verts: local.map(world), d: sec.id, eps: ROUGH_MM[r.mat] ?? 0.045, dn: r.mat === 'pvc-sold' ? sec.p.dn : 0, level: r.water ? world([0, 0, r.level])[2] : null, method: r.water || 'weights', fittings, local: r.mat === 'pvc-sold' };
+    });
+    const fx = ports.filter((q) => q.system === sys).map((q) => ({ id: q.id, p: worldOf(w, q.storey, cache)(q.p), kind: q.fixture }));
+    const net = waterNetwork(list, fx);
+    for (const x of list) { const n = net.runs.get(x.guid); if (n) runs.set(x.guid, { ...n, system: sys, localLosses: x.local }); else unfed.add(x.guid); }
+    for (const [id, f] of net.fixtures) fixtures.set(id, f);
+  }
+  return { runs, fixtures, unfed };
+}
+/** Every water pipe fed from a tank made the smallest size whose speed stays at or under 3 m/s for its design flow (one undo
+ *  step; never smaller than drawn). */
+/** The water pipes fed from a tank that are too small for 3 m/s: Map(guid → the size they need). */
+export function waterGrowth(w) {
+  const plan = waterPlan(w), runs = new Map(readRuns(w).map((r) => [r.guid, r])), out = new Map();
+  for (const [g, q] of plan.runs) {
+    const r = runs.get(g), qMax = Math.max(0, ...q.pieces.map((p) => p.q));
+    if (!(qMax > 0)) continue;
+    const v = pipeForFlow(r.mat, r.cls, qMax, MAX_SPEED, 'mm');
+    if (!v) continue;
+    if (nominalOf(pipeSize(r.mat, r.cls, v.size)) > nominalOf(pipeSize(r.mat, r.cls, r.size)) + 1e-9) out.set(g, v.size);
+  }
+  return out;
+}
+export function sizeWater() {
+  return op((w) => {
+    const grow = waterGrowth(w), runs = new Map(readRuns(w).map((r) => [r.guid, r])), storeys = new Set();
+    for (const [g, size] of grow) {
+      const r = runs.get(g);
+      const nr = { ...r, size };
+      writeDef(w, r.id, nr);
+      relabel(w, r.id, nr);
       storeys.add(r.storey);
     }
     for (const st of storeys) regenMep(w, st);

@@ -3,7 +3,7 @@ title: Pipes and ducts
 summary: Draw pipe and duct runs on the plan by their centre lines; the elbows, tees, reducers and transitions are made for you, the runs belong to systems with connected ports in the IFC file, and they show in plans, schedules and the takeoff.
 section: tasks
 order: 36
-keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
+keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, water supply, pressure, head loss, tank, reservatório, nbr 5626, pesos, weights, vazão, pressão, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
 ---
 
 ## What you'll do
@@ -95,6 +95,29 @@ A vent's UHC are those of the drains it and the vents into it vent, each counted
 
 :::note
 A vent should rise at least 1 % towards the open end; BimCraft draws vents level unless you give the corners their heights.
+:::
+
+## Cold and hot water from a tank (NBR 5626)
+
+Draw the water pipes from the tank out: the first pipe leaves the tank, and every other pipe starts on the pipe that feeds it and ends at a fixture's water connector (or on further pipes). Pick the pipe that leaves the tank and set **Fed from** to a tank, with the **Water level** of the tank (its height above this level).
+
+**Fed from** also says how the design flow of each pipe is found. NBR 5626 leaves the method to the project, to be stated and justified in its report:
+
+- **Flows by weights** is the empirical method of the 1998 edition: Q = 0.3 √ΣP (L/s), from the weights of the fixtures the pipe feeds, never more than the sum of their design flows.
+- **Every fixture at once** adds up the fixtures' design flows.
+
+The fixtures' design flows and weights are those of NBR 5626:1998 for the plumbing fixtures to start from: water closet with a cistern 0.15 L/s and 0.3, lavatory 0.15 and 0.3, kitchen sink 0.25 and 0.7, shower 0.20 and 0.4, laundry tub 0.25 and 0.7.
+
+Pick any water pipe fed from a tank to see:
+
+- **Flow**: its design flow, its speed and how much it loses per metre, by the universal (Darcy–Weisbach) equation for water at 20 °C. Faster than 3 m/s is shown in red: NBR 5626 allows it only where water hammer and noise are shown not to matter.
+- **Pressure**: the lowest along it and at its end. Fittings of PVC soldável add their equivalent lengths (elbows, tees, valves); in other pipes only the pipe counts. Under 5 kPa is shown in red, except down the drop from the tank to its header.
+- Each fixture it feeds: the dynamic pressure at its connector (10 kPa or more) and the static pressure from the water level (400 kPa or less).
+
+{{ui:Size the water pipes}} makes each pipe fed from a tank that runs faster than 3 m/s the smallest size that does not, as one step you can undo. Pressures are not changed for you: give a pipe a bigger size, or raise the tank, where they are short.
+
+:::note
+A fixture may need more than 10 kPa: take its pressure from its maker. These checks help the design; the project's engineer chooses the method and signs the report.
 :::
 
 ## Valves
