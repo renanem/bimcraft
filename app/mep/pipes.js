@@ -5,8 +5,9 @@
  * esgoto NBR 5688). DOM-free. Which standard a run follows comes from its material.
  *
  *   MATERIALS, CLASSES, DEFAULT_CLASS · sizesFor(mat, cls) (smallest first) · pipeSize(mat, cls, size) (as tables.js; a Brazilian
- *   size has metric: true and its label) · bendRadius(p) (inches) · drainSlope(p) → the smallest slope its standard allows a
- *   horizontal drain of that size (IPC 2021 Table 704.1 for the US tables, NBR 8160 for the Brazilian ones)
+ *   size has metric: true and its label) · bendRadius(p) (inches) · drainSlope(p, system) → the smallest slope its standard allows
+ *   a horizontal drain of that size (IPC 2021 Table 704.1 for the US tables, NBR 8160 for the Brazilian ones; a Brazilian storm
+ *   drain 0.5 %, NBR 10844)
  *   standardOf(mat) → 'us' | 'br' · SYSTEM_MATERIALS[std][system] → the usual material of a system under a standard
  *   BR_MAX_VELOCITY (m/s): the speed Brazilian water pipes are sized to by flow (NBR 5626)
  */
@@ -39,7 +40,9 @@ export function pipeSize(mat, cls, size) {
 export function bendRadius(p) {
   return p.metric ? p.od : US.bendRadius(p);
 }
-export function drainSlope(p) {
+/** A storm drain in a Brazilian pipe follows NBR 10844 (0.5 %), a sanitary one NBR 8160. */
+export function drainSlope(p, system) {
   if (!p) return null;
+  if (p.metric && system === 'storm') return 0.005;
   return p.metric ? brDrainSlope(p.dn) : US.minDrainSlope(p.nps);
 }

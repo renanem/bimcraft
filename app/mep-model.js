@@ -59,6 +59,9 @@ import { CONNECTOR_PSET } from './family-model.js';
 import { drainNetwork, smallestSize, upstreamFirst, MAIN_MIN_DN } from './mep/drainage.js';
 import { ventNetwork, branchVentSize, ventStackSize, trapDistance, alongLine } from './mep/vents.js';
 import { waterNetwork, MAX_SPEED } from './mep/water.js';
+import { stormNetwork, downpipeDiameter, manningFlow, MIN_SLOPE as STORM_MIN_SLOPE } from './mep/storm.js';
+/** The rainfall intensity a storm run counts when it says none (mm/h): what NBR 10844 allows for up to 100 m² of roof in plan. */
+export const STORM_RAIN = 150;
 
 export const RUN_PSET = 'CadCraft_MepRun';
 const SYS_PSET = 'CadCraft_MepSystem';
@@ -306,6 +309,7 @@ export function readRuns(w) {
       shape: DUCT_SHAPES.includes(ps.Shape) ? ps.Shape : 'rect', w: mmOf(w, ps.Width), h: mmOf(w, ps.Height), slope: Number(ps.Slope) || 0, flow: Number(ps.Flow) || 0,
       role: ps.DrainRole === 'main' || ps.DrainRole === 'stack' ? ps.DrainRole : 'branch', floors: ps.Floors === 'upto3' || ps.Floors === 'more' ? ps.Floors : '',
       water: ps.Water === 'weights' || ps.Water === 'sum' ? ps.Water : '', level: mmOf(w, ps.WaterLevel), waterNote: String(ps.WaterNote || ''),
+      area: Number(ps.Area) || 0, rain: Number(ps.Rainfall) || 0, outlet: ps.Outlet === 'funnel' ? 'funnel' : 'edge', gutter: Number(ps.GutterDepth) || 0,
       valves: Array.isArray(valves) ? valves.filter((v) => v && Number.isFinite(v.s) && VALVE_KINDS[v.kind]).map((v) => ({ s: v.s, kind: v.kind })) : [],
       parts: aggKids(w, id),
     });
@@ -324,7 +328,8 @@ function writeDef(w, id, r) {
     Lm('Width', r.kind === 'duct' ? r.w : 0), Lm('Height', r.kind === 'duct' ? r.h : 0), ['Slope', 'IFCREAL', round(r.slope || 0, 9)], ['Flow', 'IFCREAL', round(r.flow || 0, 6)],
     ['Valves', 'IFCTEXT', JSON.stringify((r.valves || []).map((v) => ({ s: round(v.s, 3), kind: v.kind })))], ['DrainRole', 'IFCLABEL', r.role === 'main' || r.role === 'stack' ? r.role : 'branch'],
     ['Floors', 'IFCLABEL', r.floors === 'upto3' || r.floors === 'more' ? r.floors : ''],
-    ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0), ['WaterNote', 'IFCTEXT', r.water ? String(r.waterNote || '').slice(0, 2000) : '']]);
+    ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0), ['WaterNote', 'IFCTEXT', r.water ? String(r.waterNote || '').slice(0, 2000) : ''],
+    ['Area', 'IFCREAL', round(r.area || 0, 4)], ['Rainfall', 'IFCREAL', round(r.rain || 0, 4)], ['Outlet', 'IFCLABEL', r.outlet === 'funnel' ? 'funnel' : 'edge'], ['GutterDepth', 'IFCREAL', round(r.gutter || 0, 4)]]);
 }
 /** Plane angles in the file's own unit (radians unless the project says degrees). */
 function angleUnit(w) {
@@ -672,12 +677,12 @@ export function runDefaults(kind, system, size, std = 'us') {
   const usual = mat === 'pvc-esg' ? (key === 'vent' ? '50' : '100') : mat === 'pvc-sold' ? '25' : S.drain ? '3' : '3/4';
   const sizes = sizesFor(mat, cls), sz = sizes.includes(size) ? size : (sizes.includes(usual) ? usual : sizes[0]);
   const p = pipeSize(mat, cls, sz);
-  return { kind, system: key, mat, cls, size: sz, slope: S.drain && p ? drainSlope(p) : 0 };
+  return { kind, system: key, mat, cls, size: sz, slope: S.drain && p ? drainSlope(p, key) : 0 };
 }
 /** The smallest drain slope the run's code allows it (null when it is not a drain). */
 export function drainMinimum(r) {
   if (r.kind !== 'pipe' || !PIPE_SYSTEMS[r.system]?.drain) return null;
-  return drainSlope(pipeSize(r.mat, r.cls, r.size));
+  return drainSlope(pipeSize(r.mat, r.cls, r.size), r.system);
 }
 
 export function placeRun(spec) {
@@ -919,6 +924,51 @@ export function sizeWater() {
       const nr = { ...r, size };
       writeDef(w, r.id, nr);
       relabel(w, r.id, nr);
+      storeys.add(r.storey);
+    }
+    for (const st of storeys) regenMep(w, st);
+    return { id: null, ids: [] };
+  });
+}
+
+// ---- storm drains (NBR 10844) ----
+/** Storm runs in Brazilian pipe: Map(guid → { id, guid, role (stack = downpipe, else horizontal), q (L/min), own, length (downpipe,
+ *  m), D (mm inside it needs), off ('H' | 'L' | 'D' off the abacus), cap (L/min the drawn size carries), size, need, grow, toobig }) */
+export function stormPlan(w) {
+  const cache = new Map(), plan = new Map();
+  const list = readRuns(w).filter((r) => r.kind === 'pipe' && r.system === 'storm' && standardOf(r.mat) === 'br').map((r) => ({ r, sec: sectionOf(r) })).filter((x) => x.sec);
+  const runs = list.map(({ r, sec }) => ({ r, sec, guid: r.guid, od: sec.od, area: r.area, i: r.rain || STORM_RAIN, verts: runVertices(r).map(worldOf(w, r.storey, cache)) }));
+  const net = stormNetwork(runs);
+  for (const x of runs) {
+    const { r, sec } = x, n = net.get(r.guid), q = n.q;
+    const sizes = sizesFor(r.mat, r.cls).map((key) => ({ key, s: sectionOf({ ...r, size: key }) })).filter((y) => y.s);
+    const now = sec.id;
+    let need = null, D = null, off = null, cap = 0, length = 0;
+    if (r.role === 'stack') {
+      // the downpipe's length: its legs going down
+      for (let i = 1; i < x.verts.length; i++) length += Math.max(0, x.verts[i - 1][2] - x.verts[i][2]) / 1000;
+      const d = downpipeDiameter(r.outlet, q, r.gutter || 0, length);
+      if (d.off) off = d.off;
+      else { D = d.D; need = sizes.find((y) => y.s.id + 1e-6 >= D) || null; }
+    } else {
+      const slope = Math.max(r.slope || 0, 0);
+      cap = manningFlow(now, slope);
+      if (q > 0) need = slope + 1e-9 >= STORM_MIN_SLOPE ? sizes.find((y) => manningFlow(y.s.id, slope) + 1e-9 >= q) || null : null;
+    }
+    const grow = !!need && need.s.id > now + 1e-6;
+    plan.set(r.guid, { id: r.id, guid: r.guid, role: r.role === 'stack' ? 'stack' : 'branch', q, own: n.own, length, D, off, cap, size: r.size, need: need?.key ?? null, needId: need?.s.id ?? null, grow,
+      toobig: q > 0 && !need && !off && (r.role === 'stack' || (r.slope || 0) + 1e-9 >= STORM_MIN_SLOPE), flat: r.role !== 'stack' && q > 0 && (r.slope || 0) + 1e-9 < STORM_MIN_SLOPE });
+  }
+  return plan;
+}
+export function sizeStorm() {
+  return op((w) => {
+    const plan = stormPlan(w), runs = new Map(readRuns(w).map((r) => [r.guid, r])), storeys = new Set();
+    for (const q of plan.values()) {
+      if (!q.grow) continue;
+      const r = runs.get(q.guid), next = { ...r, size: q.need };
+      writeDef(w, r.id, next);
+      relabel(w, r.id, next);
       storeys.add(r.storey);
     }
     for (const st of storeys) regenMep(w, st);

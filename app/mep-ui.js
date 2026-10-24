@@ -21,7 +21,7 @@
  * makeTakeoff) gets them through `takeoffExtra`. Test hook: window.bimcraftMep = { state, api }.
  */
 import { readRuns, placeRun, changeRun, removeRuns, addValve, removeValve, mepLayout, sectionOf, runVertices, runDefaults, drainMinimum, along, runLength, readFixturePorts, drainPlan, sizeDrains,
-  ventPlan, sizeVents, trapPlan, buildingFloors, waterPlan, sizeWater, waterGrowth,
+  ventPlan, sizeVents, trapPlan, buildingFloors, waterPlan, sizeWater, waterGrowth, stormPlan, sizeStorm, STORM_RAIN,
   PIPE_SYSTEMS, DUCT_SYSTEMS, VALVE_KINDS, DUCT_SHAPES, systemLabel, pipeForFlow, ductForFlow, ductLoss, runSchedules } from './mep-model.js';
 import { MATERIALS, CLASSES, DEFAULT_CLASS, sizesFor, pipeSize, standardOf, BR_MAX_VELOCITY } from './mep/pipes.js';
 import { ModelWriter } from './model-write.js';
@@ -384,6 +384,7 @@ export function mountMep(modelUi) {
       if (r.system === 'san') drainRows(r, kit, run);
       if (r.system === 'vent' && standardOf(r.mat) === 'br') ventRows(r, kit, run);
       if (r.system === 'cw' || r.system === 'hw') fed = waterRows(r, kit, run);
+      if (r.system === 'storm' && standardOf(r.mat) === 'br') stormRows(r, kit, run);
     } else {
       kit.field(t('mep.shape'), kit.select(DUCT_SHAPES.map((s) => [s, t('mep.shape.' + s)]), r.shape, 'data-mp-mepshape', (v) => run({ shape: v, h: v === 'round' ? r.w : (v === 'oval' && !(r.w > r.h) ? r.w / 2 : r.h) })));
       kit.field(t(r.shape === 'round' ? 'mep.diameter' : 'mep.width'), kit.lenInput(r.w, 'data-mp-mepw', (mm) => run({ w: mm, ...(r.shape === 'round' ? { h: mm } : {}) }), { min: 50 }));
@@ -399,7 +400,7 @@ export function mountMep(modelUi) {
     kit.field(t('mep.z'), kit.lenInput(z0, 'data-mp-mepz', (mm) => run({ points: r.points.map((q) => [q[0], q[1], q[2] + (mm - z0)]) }), { any: true }));
     kit.rows.push(el('dt', {}, t('mep.length')), el('dd', { 'data-mp-meplen': '' }, L(runLength(r)) + ' · ' + t('mep.parts', { n: r.parts.length })));
     // a pipe in a network fed from a tank has its flow from the fixtures: no flow typed by hand
-    if (r.kind === 'pipe' && r.system !== 'san' && r.system !== 'vent' && !fed && r.flow >= 0) {
+    if (r.kind === 'pipe' && r.system !== 'san' && r.system !== 'vent' && r.system !== 'storm' && !fed && r.flow >= 0) {
       const fb = el('input', { type: 'text', className: 'bc-input bc-num', value: r.flow ? String(r.flow) : '', 'data-mp-mepgpm': '', size: 6 });
       const go = kit.button(t('mep.sizeit'), 'data-mp-mepsizeit', () => {
         const q = Number(fb.value.replace(',', '.'));
@@ -486,6 +487,39 @@ export function mountMep(modelUi) {
       A.commit(sizeWater(), { label: t('mep.sizewater.label', { n }), verb: t('model.verb.changed') });
     }));
     return true;
+  }
+  /** A storm drain in Brazilian pipe (NBR 10844): horizontal or a downpipe; the roof area and rainfall it takes in; a downpipe's
+   *  gutter outlet and water depth; its flow and the size it needs (Manning at 2/3 full, or the abacuses of Figure 3). */
+  function stormRows(r, kit, run) {
+    const num = (value, attr, fn) => {
+      const i = el('input', { type: 'text', className: 'bc-input bc-num', value: value ? String(value) : '', [attr]: '', size: 7 });
+      i.addEventListener('change', () => { const v = Number(String(i.value).replace(',', '.')); if (Number.isFinite(v) && v >= 0) fn(v); else { A.host.status(t('mep.err.number'), true); i.value = value ? String(value) : ''; } });
+      return i;
+    };
+    kit.field(t('mep.storm.role'), kit.select([['branch', t('mep.storm.role.branch')], ['stack', t('mep.storm.role.stack')]], r.role === 'stack' ? 'stack' : 'branch', 'data-mp-mepsrole', (v) => run({ role: v })));
+    kit.field(t('mep.storm.area'), num(r.area, 'data-mp-mepsarea', (v) => run({ area: v })));
+    kit.field(t('mep.storm.rain'), num(r.rain || STORM_RAIN, 'data-mp-mepsrain', (v) => run({ rain: v })));
+    if (r.role === 'stack') {
+      kit.field(t('mep.storm.outlet'), kit.select([['edge', t('mep.storm.outlet.edge')], ['funnel', t('mep.storm.outlet.funnel')]], r.outlet || 'edge', 'data-mp-mepsoutlet', (v) => run({ outlet: v })));
+      kit.field(t('mep.storm.h'), num(r.gutter, 'data-mp-mepsh', (v) => run({ gutter: v })));
+    }
+    let q = null;
+    try { q = stormPlan(W()).get(r.guid); } catch (e) { console.error(e); }
+    if (!q) return;
+    const flow = Math.round(q.q) + ' L/min';   // i18n-ignore: unit
+    const size = q.need ? sizeName(r.mat, r.cls, q.need) : '';
+    const text = !(q.q > 0) ? t('mep.storm.none') : q.off ? t('mep.storm.off.' + q.off, { q: flow }) : q.flat ? t('mep.storm.flat', { q: flow })
+      : q.toobig ? t('mep.storm.toobig', { q: flow })
+      : q.role === 'stack' ? t('mep.storm.stack', { q: flow, h: q.length.toFixed(2) + ' m', d: q.D.toFixed(1) + ' mm', size, fig: t('mep.storm.fig.' + (r.outlet || 'edge')) })   // i18n-ignore: units
+      : t('mep.storm.text', { q: flow, size });
+    kit.rows.push(el('dt', {}, t('mep.storm.flow')), el('dd', { className: q.grow || q.toobig || q.off || q.flat ? 'bc-input-err' : 'bc-muted', 'data-mp-mepsflow': '' }, text));
+    kit.field('', kit.button(t('mep.sizestorm'), 'data-mp-mepsizestorm', () => {
+      let plan;
+      try { plan = [...stormPlan(W()).values()]; } catch (e) { console.error(e); return; }
+      const grow = plan.filter((x) => x.grow).length;
+      if (!grow) { A.host.status(t('mep.sizestorm.none')); return; }
+      A.commit(sizeStorm(), { label: t('mep.sizestorm.label', { n: grow }), verb: t('model.verb.changed') });
+    }));
   }
   /** Every vent too small for what it vents made the size NBR 8160 gives it (one undo step). */
   function sizeAllVents() {

@@ -3,7 +3,7 @@ title: Pipes and ducts
 summary: Draw pipe and duct runs on the plan by their centre lines; the elbows, tees, reducers and transitions are made for you, the runs belong to systems with connected ports in the IFC file, and they show in plans, schedules and the takeoff.
 section: tasks
 order: 36
-keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, water supply, pressure, head loss, tank, reservatório, nbr 5626, pesos, weights, vazão, pressão, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
+keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, storm, storm drain, downpipe, leader, rainwater, águas pluviais, condutor vertical, condutor horizontal, nbr 10844, ábaco, abacus, rainfall, water supply, pressure, head loss, tank, reservatório, nbr 5626, pesos, weights, vazão, pressão, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
 ---
 
 ## What you'll do
@@ -75,7 +75,7 @@ Pick a sanitary drain: **Fixture units** in Properties says how many it carries 
 {{ui:Size the drains}} makes every sanitary drain of the model that is too small for its fixture units the size it needs, as one step you can undo. A drain drawn bigger than it needs is left as it is. When a drain carries more than the largest size of its pipe can at its slope, BimCraft says so: give it a steeper slope or another pipe.
 
 :::note
-In the US tables, stacks are sized as branches and vents are not sized; storm drains are not sized in either. Check them, and the whole design, against the code that applies to the project.
+In the US tables, stacks are sized as branches and vents and storm drains are not sized. Check them, and the whole design, against the code that applies to the project.
 :::
 
 ## Stacks and vents (NBR 8160)
@@ -120,6 +120,26 @@ Pick any water pipe fed from a tank to see:
 
 :::note
 A fixture may need more than 10 kPa: take its pressure from its maker. These checks help the design; the project's engineer chooses the method and signs the report.
+:::
+
+## Storm drains (NBR 10844)
+
+In Brazilian PVC drain pipe, storm drains are sized as NBR 10844 asks. Draw them in the direction the water flows, each ending on the drain it flows into: a downpipe from the gutter down, then the horizontal drains.
+
+Pick a storm drain and give it:
+
+- **Roof area**: the area that drains into it, in m², counted as NBR 10844 counts it (a sloped roof adds half its rise to its width). Leave it empty on a drain that only takes what flows into it.
+- **Rainfall**: the intensity of NBR 10844's table for the place and the return period, in mm/h. Empty, it counts 150 mm/h, which the standard allows for up to 100 m² of roof in plan.
+
+The flow is the rainfall on the area, Q = I · A / 60 (L/min), and every drain carries what flows into it too.
+
+- A **Horizontal** drain is sized with the water at 2/3 of its inner diameter (Manning–Strickler, n = 0.011), at its **Slope**: at least 0.5 %.
+- A **Downpipe** is sized from the abacuses of NBR 10844 (its Figure 3): set the **Gutter outlet** (sharp-edged or with a funnel) and the **Water in the gutter** (H, 50 to 100 mm). Its length L is how far it falls. BimCraft takes the higher of the diameters the H and L curves give at its flow, interpolating between curves, at least 70 mm inside, and the size whose inner diameter is at least that.
+
+{{ui:Size the storm drains}} makes every storm drain that is too small the size it needs, as one step you can undo. A downpipe off the abacuses (H under 50 or over 100 mm, less than 0.3 m long, or more than 150 mm inside) is not sized: BimCraft says which.
+
+:::note
+The abacuses were read from the figure curve by curve; each reading lies within about half a millimetre of the drawn line. Gutters are not drawn or sized here.
 :::
 
 ## Valves
