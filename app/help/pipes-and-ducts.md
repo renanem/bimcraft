@@ -101,12 +101,14 @@ A vent should rise at least 1 % towards the open end; BimCraft draws vents level
 
 Draw the water pipes from the tank out: the first pipe leaves the tank, and every other pipe starts on the pipe that feeds it and ends at a fixture's water connector (or on further pipes). Pick the pipe that leaves the tank and set **Fed from** to a tank, with the **Water level** of the tank (its height above this level).
 
-**Fed from** also says how the design flow of each pipe is found. NBR 5626 leaves the method to the project, to be stated and justified in its report:
+**Fed from** also says how the design flow of each pipe is found. NBR 5626:2020 does not impose a method: the project chooses one, empirical or probabilistic, recognised or properly founded, and states and justifies it in its report. BimCraft offers two, and says in the file which one the project chose:
 
-- **Flows by weights** is the empirical method of the 1998 edition: Q = 0.3 √ΣP (L/s), from the weights of the fixtures the pipe feeds, never more than the sum of their design flows.
+- **Empirical flows by weights**: Q = 0.3 √ΣP (L/s), from the weights of the fixtures the pipe feeds, never more than the sum of their design flows. It is the formula of the edition the 2020 one replaced; it is used here only as a method you choose and justify.
 - **Every fixture at once** adds up the fixtures' design flows.
 
-The fixtures' design flows and weights are those of NBR 5626:1998 for the plumbing fixtures to start from: water closet with a cistern 0.15 L/s and 0.3, lavatory 0.15 and 0.3, kitchen sink 0.25 and 0.7, shower 0.20 and 0.4, laundry tub 0.25 and 0.7.
+Write why you chose it in **Method justified by**: it is saved in the file (`CadCraft_MepRun`, `WaterNote`) and BimCraft reminds you while it is empty.
+
+The design flows and weights of the plumbing fixtures to start from are starting values: water closet with a cistern 0.15 L/s and 0.3, lavatory 0.15 and 0.3, kitchen sink 0.25 and 0.7, shower 0.20 and 0.4, laundry tub 0.25 and 0.7. Take the ones of the fixtures you specify from their makers.
 
 Pick any water pipe fed from a tank to see:
 

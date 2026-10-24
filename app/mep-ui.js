@@ -458,7 +458,13 @@ export function mountMep(modelUi) {
     const kpa = (v, d = 1) => v.toFixed(d) + ' kPa';   // i18n-ignore: unit
     const num = (v, d) => v.toFixed(d);
     kit.field(t('mep.wsrc'), kit.select([['', t('mep.wsrc.pipe')], ['weights', t('mep.wsrc.weights')], ['sum', t('mep.wsrc.sum')]], r.water || '', 'data-mp-mepwsrc', (v) => run({ water: v, level: r.level || (r.points[0][2] + 1000) })));
-    if (r.water) kit.field(t('mep.wlevel'), kit.lenInput(r.level, 'data-mp-mepwlevel', (mm) => run({ level: mm }), { any: true }));
+    if (r.water) {
+      kit.field(t('mep.wlevel'), kit.lenInput(r.level, 'data-mp-mepwlevel', (mm) => run({ level: mm }), { any: true }));
+      const nt = el('input', { type: 'text', className: 'bc-input', value: r.waterNote || '', 'data-mp-mepwnote': '', size: 24, maxLength: 2000 });
+      nt.addEventListener('change', () => run({ waterNote: nt.value.trim() }));
+      kit.field(t('mep.wnote'), nt);
+      if (!r.waterNote) kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-muted', 'data-mp-mepwnotehint': '' }, t('mep.wnote.hint')));
+    }
     let plan = null;
     try { plan = waterPlan(W()); } catch (e) { console.error(e); }
     if (!plan) return false;

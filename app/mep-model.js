@@ -305,7 +305,7 @@ export function readRuns(w) {
       points: points.map((q) => [q[0], q[1], q[2] || 0]), mat: String(ps.Material || ''), cls: String(ps.Class || ''), size: String(ps.Size || ''),
       shape: DUCT_SHAPES.includes(ps.Shape) ? ps.Shape : 'rect', w: mmOf(w, ps.Width), h: mmOf(w, ps.Height), slope: Number(ps.Slope) || 0, flow: Number(ps.Flow) || 0,
       role: ps.DrainRole === 'main' || ps.DrainRole === 'stack' ? ps.DrainRole : 'branch', floors: ps.Floors === 'upto3' || ps.Floors === 'more' ? ps.Floors : '',
-      water: ps.Water === 'weights' || ps.Water === 'sum' ? ps.Water : '', level: mmOf(w, ps.WaterLevel),
+      water: ps.Water === 'weights' || ps.Water === 'sum' ? ps.Water : '', level: mmOf(w, ps.WaterLevel), waterNote: String(ps.WaterNote || ''),
       valves: Array.isArray(valves) ? valves.filter((v) => v && Number.isFinite(v.s) && VALVE_KINDS[v.kind]).map((v) => ({ s: v.s, kind: v.kind })) : [],
       parts: aggKids(w, id),
     });
@@ -324,7 +324,7 @@ function writeDef(w, id, r) {
     Lm('Width', r.kind === 'duct' ? r.w : 0), Lm('Height', r.kind === 'duct' ? r.h : 0), ['Slope', 'IFCREAL', round(r.slope || 0, 9)], ['Flow', 'IFCREAL', round(r.flow || 0, 6)],
     ['Valves', 'IFCTEXT', JSON.stringify((r.valves || []).map((v) => ({ s: round(v.s, 3), kind: v.kind })))], ['DrainRole', 'IFCLABEL', r.role === 'main' || r.role === 'stack' ? r.role : 'branch'],
     ['Floors', 'IFCLABEL', r.floors === 'upto3' || r.floors === 'more' ? r.floors : ''],
-    ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0)]);
+    ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0), ['WaterNote', 'IFCTEXT', r.water ? String(r.waterNote || '').slice(0, 2000) : '']]);
 }
 /** Plane angles in the file's own unit (radians unless the project says degrees). */
 function angleUnit(w) {

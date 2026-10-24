@@ -110,6 +110,8 @@ ok(fW && fL && near(fW.static, (8000 - pW[2]) / 1000 * 9.81, 1e-6) && fW.p < fW.
 const n0 = ed.changes.length;
 ed.modelChange(M.sizeWater(), { label: 'Size' });
 ok(M.readRuns(W()).every((r) => r.size === rr.find((x) => x.guid === r.guid).size), 'Size the water pipes: every pipe already at or under 3 m/s, nothing changed');
+ed.modelChange(M.changeRun(src.guid, { waterNote: 'Every fixture at once: a small house, one bathroom' }), { label: 'Note' });
+ok(M.readRuns(W()).find((r) => r.guid === src.guid).waterNote === 'Every fixture at once: a small house, one bathroom', 'the justification of the method kept in the file (CadCraft_MepRun WaterNote)');
 ed.modelChange(M.changeRun(src.guid, { water: 'sum' }), { label: 'Method' });
 plan = M.waterPlan(W());
 ok(near(plan.runs.get(src.guid).pieces.find((p) => p.q > 0).q, 0.3, 1e-9), 'declared method: every fixture at once, 0.15 + 0.15 = 0.30 L/s');
