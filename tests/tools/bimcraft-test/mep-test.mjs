@@ -138,7 +138,9 @@ export async function mepMode({ APP, ROOT, WebIFC, IfcModel, quiet }) {
   const after2 = M.readRuns(B.w()), mainNow = after2.find((r) => r.size === '2'), ductNow = after2.filter((r) => r.kind === 'duct');
   ok(mainNow.parts.join() !== before.get(mainNow.guid) && ductNow.every((r) => r.parts.join() === before.get(r.guid)), 'the branch made 3/4": the main is written again (its tee is 2" × 3/4" now), the ducts are not');
   ed.undo(); ed.undo();
-  ok(M.readRuns(B.w()).length === 5 && dec(ed.save()) === dec(saved.mm), 'two undos: the file is exactly what it was, line for line');
+  // the file less its FILE_NAME line, whose time stamp is the second it was saved
+  const body = (b) => dec(b).replace(/^FILE_NAME\(.*\);$/m, '');
+  ok(M.readRuns(B.w()).length === 5 && body(ed.save()) === body(saved.mm), 'two undos: the file is exactly what it was, line for line');
   // the shapes cc-ifc draws
   let mesh = await meshOf(saved.mm);
   const all = runs.map((r) => ({ ...r, sec: M.sectionOf(r), verts: M.runVertices(r) })), LL = M.mepLayout(all);

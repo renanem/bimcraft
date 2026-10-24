@@ -25,6 +25,8 @@ export async function comfortsMode({ APP, ROOT, WebIFC, IfcModel, quiet, require
   const near = (a, b, e = 0.01) => Math.abs(a - b) <= e;
   const saved = {};
   const dec = (b) => new TextDecoder().decode(b);
+  // the file less its FILE_NAME line, whose time stamp is the second it was saved
+  const body = (b) => dec(b).replace(/^FILE_NAME\(.*\);$/m, '');
   const { ModelWriter } = await import(path.join(APP, 'model-write.js'));
   const OPS = await import(path.join(APP, 'model-ops.js'));
   const MW = await import(path.join(APP, 'model-walls.js'));
@@ -125,9 +127,9 @@ export async function comfortsMode({ APP, ROOT, WebIFC, IfcModel, quiet, require
       ok(m.types.find((x) => x.name === 'IfcWall')?.count === 2 && near(vol, ring, ring * 0.02), 'cc-ifc builds the curved wall: ' + vol.toFixed(4) + ' m³ against the half annulus ' + ring.toFixed(4) + ' m³ (within 2 %: the mitred corners)');
       // nothing is rewritten when nothing changed (the stored arc shape compares equal)
       const w = B.w();
-      const before = dec(ed.save());
+      const before = body(ed.save());
       const r0 = w.run((ww) => ({ n: MW.regenWalls(ww, L1.id).walls }));
-      ok(r0.n === 0 && dec(ed.save()) === before, 'regenWalls again: 0 walls rewritten (the stored IfcIndexedPolyCurve and IfcTrimmedCurve read back as the same shape)');
+      ok(r0.n === 0 && body(ed.save()) === before, 'regenWalls again: 0 walls rewritten (the stored IfcIndexedPolyCurve and IfcTrimmedCurve read back as the same shape)');
       // bend it, flatten it, undo
       n0 = ed.changes.length;
       ed.modelChange(OPS.changeWall(cw.guid, { bulge: MA.bulgeFromHeight(cw.a, cw.b, -1500) }));
