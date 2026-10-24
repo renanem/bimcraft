@@ -58,10 +58,15 @@ export async function familiesMode({ APP, ROOT, WebIFC, IfcModel, quiet, args })
   // ============================================================================================ the formula engine copy
   if (want('copy')) {
     console.log('== expr.js is PartCraft\'s (tools/bimcraft-test/expr-sync.mjs)');
-    ok(Buffer.compare(fs.readFileSync(path.join(ROOT, 'public_html/assets/apps/partcraft/dev/expr.js')), fs.readFileSync(path.join(APP, 'expr.js'))) === 0, 'bimcraft/dev/expr.js is byte for byte partcraft/dev/expr.js');
-    let out = '';
-    try { out = execFileSync('node', [path.join(ROOT, 'tools/bimcraft-test/expr-sync.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { out = 'FAILED ' + (e.stdout || ''); }
-    ok(!/DIFFERS|FAILED/.test(out), 'expr-sync --check: the copy and its expr.* words are in step', out.trim().split('\n').slice(-1)[0]);
+    // a clone of this app alone has no PartCraft beside it: the copy checks need the whole site
+    const canon = path.join(ROOT, 'public_html/assets/apps/partcraft/dev/expr.js');
+    if (!fs.existsSync(canon)) console.log('  --   PartCraft is not in this checkout: the copy checks skipped');
+    else {
+      ok(Buffer.compare(fs.readFileSync(canon), fs.readFileSync(path.join(APP, 'expr.js'))) === 0, 'bimcraft/dev/expr.js is byte for byte partcraft/dev/expr.js');
+      let out = '';
+      try { out = execFileSync('node', [path.join(ROOT, 'tools/bimcraft-test/expr-sync.mjs'), '--check'], { encoding: 'utf8' }); } catch (e) { out = 'FAILED ' + (e.stdout || ''); }
+      ok(!/DIFFERS|FAILED/.test(out), 'expr-sync --check: the copy and its expr.* words are in step', out.trim().split('\n').slice(-1)[0]);
+    }
   }
 
   // ============================================================================================ starters = doorParts / windowParts

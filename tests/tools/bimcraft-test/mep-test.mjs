@@ -47,7 +47,10 @@ export async function mepMode({ APP, ROOT, WebIFC, IfcModel, quiet }) {
   // ============================================================================================ the tables are the add-ons'
   console.log('== the pipe and duct tables (copies of CadCraft\'s Piping and HVAC add-ons)');
   const ADD = path.join(ROOT, 'public_html/assets/apps/cadcraft/dev/addons');
-  for (const [from, to] of [['piping/lib/tables.js', 'tables.js'], ['hvac/lib/sizing.js', 'sizing.js']]) {
+  // a clone of this app alone has no CadCraft beside it: the copy checks need the whole site
+  const haveAdd = fs.existsSync(path.join(ADD, 'piping/lib/tables.js')) && fs.existsSync(path.join(ADD, 'hvac/lib/sizing.js'));
+  if (!haveAdd) console.log('  --   CadCraft\'s add-ons are not in this checkout: the copy checks skipped');
+  else for (const [from, to] of [['piping/lib/tables.js', 'tables.js'], ['hvac/lib/sizing.js', 'sizing.js']]) {
     ok(Buffer.compare(fs.readFileSync(path.join(ADD, from)), fs.readFileSync(path.join(APP, 'mep', to))) === 0, 'mep/' + to + ' is byte for byte the add-on\'s ' + from + ' (node tools/bimcraft-test/mep-sync.mjs)');
   }
 
@@ -232,7 +235,7 @@ export async function mepMode({ APP, ROOT, WebIFC, IfcModel, quiet }) {
   const want = T.sizesFor('copper', 'L').slice().sort((a, b) => T.nominal(a) - T.nominal(b)).find((sz) => { const q = T.pipeSize('copper', 'L', sz); const A = Math.PI * (q.id * 0.0254) ** 2 / 4; return 10 * 3.785411784 / 60 / 1000 / A <= 8 * 0.3048; });
   ok(pf && pf.size === want && pf.v <= 8, '10 gpm in copper L at 8 ft/s or less: ' + want, pf && pf.size);
   const df = M.ductForFlow({ q: 1000, rate: 0.08, shape: 'round', u: 'in' });
-  const ADDS = await import(path.join(ADD, 'hvac/lib/sizing.js'));
+  const ADDS = await import(path.join(haveAdd ? ADD : path.join(APP, 'mep'), haveAdd ? 'hvac/lib/sizing.js' : 'sizing.js'));
   ok(df && near(df.w, ADDS.sizeSection({ q: 1000, rate: 0.08, shape: 'round', u: 'in' }).w * 25.4, 1e-9), '1000 cfm at 0.08 in. w.g./100 ft, round: the HVAC add-on\'s size (' + (df.w / 25.4) + '")');
   const loss = M.ductLoss({ kind: 'duct', flow: 1000, shape: 'round', w: df.w }, 'in');
   ok(loss && loss.rate <= 0.08 + 1e-9 && loss.V > 0, 'that duct as drawn: friction at or under the target, its velocity ' + Math.round(loss?.V || 0) + ' fpm');

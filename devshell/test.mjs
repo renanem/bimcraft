@@ -31,6 +31,7 @@ const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : null; };
 const OFFLINE = args.includes('--offline');
 const ORACLES = args.includes('--oracles');
+const WIN = process.platform === 'win32';
 /** npm packages that are copyleft reference readers: installed only with --oracles (0.4 part 2, L.5). */
 const COPYLEFT_NPM = { 'web-ifc': 'MPL-2.0', 'occt-import-js': 'LGPL-2.1', '@mlightcad/libredwg-web': 'GPL-3.0' };
 
@@ -94,7 +95,8 @@ function npmInstall() {
     if (cl.length && !ORACLES) { out.push(`${d}: not installed — needs ${cl.map((n) => `${n} (${COPYLEFT_NPM[n]})`).join(', ')}, a test-only reference reader; run npm test -- --oracles to include it`); continue; }
     console.log(`npm install in tests/tools/${d} …`);
     const lock = fs.existsSync(path.join(dir, 'package-lock.json'));
-    const r = spawnSync('npm', [lock ? 'ci' : 'install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: dir, stdio: 'inherit' });
+    // Windows: npm is npm.cmd, which Node runs only through a shell (the arguments here are fixed words)
+    const r = spawnSync('npm', [lock ? 'ci' : 'install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: dir, stdio: 'inherit', shell: WIN });
     if (r.status !== 0) out.push(`${d}: npm ${lock ? 'ci' : 'install'} failed`);
   }
   return out;
@@ -109,6 +111,8 @@ function pythonVenvs() {
     const dir = path.join(tools, d), req = path.join(dir, 'requirements.txt');
     if (!fs.existsSync(req) || fs.existsSync(path.join(dir, 'venv/bin/python'))) continue;
     if (OFFLINE) { out.push(`${d}: Python packages not installed (--offline)`); continue; }
+    // the checks look for venv/bin/python, which a venv made on Windows does not have (it has Scripts\python.exe)
+    if (WIN) { out.push(`${d}: its Python checks are skipped on Windows (they need venv/bin/python): run npm test in WSL for them`); continue; }
     console.log(`python venv in tests/tools/${d} …`);
     const mk = spawnSync('python3', ['-m', 'venv', path.join(dir, 'venv')], { stdio: 'inherit' });
     if (mk.status !== 0) { out.push(`${d}: python3 -m venv failed (install python3-venv), its checks are skipped`); continue; }

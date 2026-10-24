@@ -544,7 +544,10 @@ export async function draw06Mode({ APP, ROOT, WebIFC, IfcModel, quiet, args = []
   }
 
   // ============================================================================================ DF.24 CivilCraft's ground
-  if (want('df24')) {
+  // a clone of this app alone has no CivilCraft beside it: the surfaces come from CivilCraft's own writer
+  const haveCivil = fs.existsSync(path.join(ROOT, 'public_html/assets/apps/civilcraft/dev/landxml.js'));
+  if (want('df24') && !haveCivil) console.log('  --   CivilCraft is not in this checkout: the DF.24 LandXML checks skipped');
+  if (want('df24') && haveCivil) {
     console.log('== DF.24 LandXML surfaces as the ground (res-terrain.js readLandXmlSurfaces)');
     const RT = await import(path.join(APP, 'res-terrain.js'));
     const TIN = await RT.loadTin();
