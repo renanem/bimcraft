@@ -55,7 +55,10 @@ import { loadTin, readTerrain, readPads, readHardscape, finishedSurface, existin
 import { modelTriangles, projectView, elevationDirs } from './res-views.js';
 import { buildSet, setPdf, sheetSvg, PAPERS, readSectionLines, placeSectionLine, changeSectionLine, removeSectionLines, sectionDir } from './res-sheets.js';
 import { viewerToPlan } from './model-plan.js';
-import { DEVICES, symbolPlan, symbolScale, wallSpot, readDevices, placeDevice, changeDevice, linkLight, removeDevices, deviceSchedule, circuitSchedule, isLight, isSwitch } from './res-elec.js';
+import { DEVICES, symbolPlan, symbolScale, wallSpot, readDevices, placeDevice, changeDevice, linkLight, removeDevices, deviceSchedule, circuitSchedule, isLight, isSwitch,
+  circuitPlan, setCircuit, sizeCircuits, setElectricalProject, readElectricalProject } from './res-elec.js';
+import { SECTIONS, METHOD_KEYS, METHODS, BREAKERS, SYSTEMS, SPACINGS } from './elec/nbr5410.js';
+import { PHASES, cableText } from './elec/circuit.js';
 import { GROUPS as EL_GROUPS, SYMBOLS as EL_SYMBOLS } from './res-elec-symbols.js';
 import { counterCabinets, counterRuns, readCountertops, countertopState, placeCountertop, changeCountertop, fitCountertop, removeCountertops, COUNTER_DEFAULTS } from './res-counter.js';
 
@@ -822,6 +825,7 @@ export function mountRes(modelUi) {
     const ci = el('input', { type: 'text', className: 'bc-input', value: d.circuit, maxLength: 20, 'data-mp-elcircuit': '' });
     ci.addEventListener('change', () => run({ circuit: ci.value }));
     kit.field(t('res.el.sch.circuit'), ci);
+    if (d.kind !== 'board' && d.circuit) circuitRows(d, kit);
     if (d.kind !== 'board') {
       const ld = el('input', { type: 'text', className: 'bc-input bc-num', value: String(Math.round(d.load)), 'data-mp-elload': '' });
       ld.addEventListener('change', () => { const v = Number(ld.value); if (v >= 0) run({ load: v }); else ld.value = ld.defaultValue; });
@@ -839,9 +843,74 @@ export function mountRes(modelUi) {
     }
     return { title };
   }
+  /** The circuit a device is on, designed as NBR 5410:2004 asks: the voltage system of the project, what the circuit is and where it
+   *  runs, what it needs and what is chosen (one undo step each), and the conductors, breaker and voltage drop that follow. */
+  function circuitRows(d, kit) {
+    const w = writer();
+    if (!w) return;
+    let plan = null, sys = '127/220';
+    try { plan = circuitPlan(w, R.devs); sys = readElectricalProject(w).system; } catch (e) { console.error(e); return; }
+    const p = plan.get(d.circuit);
+    if (!p) return;
+    const c = p.circuit, r = p.result, meta = { label: t('res.el.cd'), verb: t('model.verb.changed') };
+    const set = (patch) => A.commit(setCircuit(d.circuit, patch), meta);
+    const num = (value, attr, fn, ph = '') => {
+      const i = el('input', { type: 'text', className: 'bc-input bc-num', value: value ? String(value) : '', placeholder: ph, size: 6, [attr]: '' });
+      i.addEventListener('change', () => { const v = Number(String(i.value).replace(',', '.')); if (Number.isFinite(v) && v >= 0) fn(v); else { A.host.status(t('mep.err.number'), true); i.value = value ? String(value) : ''; } });
+      return i;
+    };
+    const opt = (list, cur, attr, fn) => kit.select(list, cur, attr, fn);
+    kit.rows.push(el('dt', { className: 'bc-sub' }, t('res.el.cd')), el('dd', {}, ''));
+    kit.field(t('res.el.cd.system'), opt(Object.keys(SYSTEMS).map((k) => [k, k + ' V']), sys, 'data-mp-elsystem', (v) => A.commit(setElectricalProject({ system: v }), meta)));   // i18n-ignore: volts
+    kit.field(t('res.el.cd.phases'), opt(PHASES.map((x) => [x, t('res.el.cd.phases.' + x)]), c.phases, 'data-mp-elphases', (v) => set({ phases: v })));
+    kit.field(t('res.el.cd.use'), opt([['', t('res.el.cd.use.auto', { use: t('res.el.cd.use.' + p.autoUse) })], ['lighting', t('res.el.cd.use.lighting')], ['power', t('res.el.cd.use.power')]], p.rec.use || '', 'data-mp-eluse', (v) => set({ use: v })));
+    kit.field(t('res.el.cd.pf'), num(c.pf === 1 ? '' : c.pf, 'data-mp-elpf', (v) => (v > 0 && v <= 1 ? set({ pf: v }) : A.host.status(t('mep.err.number'), true)), '1'));
+    kit.field(t('res.el.cd.demand'), num(c.demand === 1 ? '' : c.demand, 'data-mp-eldemand', (v) => (v > 0 && v <= 1 ? set({ demand: v }) : A.host.status(t('mep.err.number'), true)), '1'));
+    kit.field(t('res.el.cd.length'), kit.lenInput(c.length * 1000, 'data-mp-ellength', (mm) => set({ length: mm / 1000 }), { allowZero: true }));
+    kit.field(t('res.el.cd.method'), opt(METHOD_KEYS.map((k) => [k, t('res.el.method.' + k)]), c.method, 'data-mp-elmethod', (v) => set({ method: v })));
+    kit.field(t('res.el.cd.insulation'), opt([['pvc', t('res.el.cd.ins.pvc')], ['epr', t('res.el.cd.ins.epr')]], c.insulation, 'data-mp-elins', (v) => set({ insulation: v })));
+    kit.field(t('res.el.cd.ambient'), num(p.rec.ambient, 'data-mp-elambient', (v) => set({ ambient: v }), t('res.el.cd.ambient.auto')));
+    kit.field(t('res.el.cd.grouped'), num(c.grouped > 1 ? c.grouped : '', 'data-mp-elgrouped', (v) => set({ grouped: Math.max(1, Math.round(v)) }), '1'));
+    const ref = METHODS[c.method]?.ref, grp = METHODS[c.method]?.group;
+    if (ref === 'C') kit.field(t('res.el.cd.arrangement'), opt([['', t('res.el.cd.arr.layer')], ['bundle', t('res.el.cd.arr.bundle')]], c.arrangement, 'data-mp-elarr', (v) => set({ arrangement: v })));
+    if (ref === 'D') {
+      if (c.grouped > 1) kit.field(t('res.el.cd.spacing'), opt(SPACINGS.map((x) => [String(x), x === 0 ? t('res.el.cd.spacing.nil') : L(x * 1000)]), String(SPACINGS.find((x) => x >= c.spacing - 1e-9) ?? 0), 'data-mp-elspacing', (v) => set({ spacing: Number(v) })));
+      kit.field(t('res.el.cd.soil'), num(p.rec.soil === 2.5 ? '' : p.rec.soil, 'data-mp-elsoil', (v) => (v >= 1 ? set({ soil: v }) : A.host.status(t('mep.err.number'), true)), '2.5'));
+    }
+    kit.field(t('res.el.cd.droplimit'), num(c.dropLimit === 4 ? '' : c.dropLimit, 'data-mp-eldroplimit', (v) => (v > 0 ? set({ dropLimit: v }) : A.host.status(t('mep.err.number'), true)), '4'));
+    if (c.phases === '3FN') kit.field(t('res.el.cd.neutral'), opt([['0', t('res.el.cd.neutral.same')], ['1', t('res.el.cd.neutral.reduced')]], c.reducedNeutral ? '1' : '0', 'data-mp-elneutral', (v) => set({ reducedNeutral: v === '1' })));
+    kit.field(t('res.el.cd.section'), opt([['0', t('res.el.cd.none')], ...SECTIONS.map((x) => [String(x), x + ' mm²'])], String(c.section || 0), 'data-mp-elsection', (v) => set({ section: Number(v) })));   // i18n-ignore: unit
+    kit.field(t('res.el.cd.breaker'), opt([['0', t('res.el.cd.none')], ...BREAKERS.map((x) => [String(x), x + ' A'])], String(c.breaker || 0), 'data-mp-elbreaker', (v) => set({ breaker: Number(v) })));   // i18n-ignore: unit
+    // what follows
+    const f1 = (x) => x.toFixed(1), say = (key, args) => t('res.el.cd.' + key, args);
+    kit.rows.push(el('dt', {}, say('current')), el('dd', { className: 'bc-muted', 'data-mp-elib': '' }, r.error === 'load' ? say('err.load') : say('current.text', { ib: f1(r.ib), v: r.volts, w: Math.round(p.watts) })));
+    if (r.error && r.error !== 'load') kit.rows.push(el('dt', {}, say('needs')), el('dd', { className: 'bc-input-err', 'data-mp-elneed': '' }, say('err.' + r.error)));
+    else if (r.need) {
+      const n = r.need, e = { section: n.section, breaker: n.breaker, iz: f1(n.iz), kt: r.kTemp, kg: r.kGroup };
+      kit.rows.push(el('dt', {}, say('needs')), el('dd', { className: r.grow ? 'bc-input-err' : 'bc-muted', 'data-mp-elneed': '' }, say(r.kSoil !== 1 ? 'needs.text.soil' : 'needs.text', { ...e, ks: r.kSoil }) + ' ' + cableText(c, n.section, { reducedNeutral: c.reducedNeutral })));
+    }
+    if (r.now && c.section > 0) {
+      const x = r.now, bad = [];
+      if (!x.ampacityOk) bad.push(say('bad.amp', { iz: x.iz == null ? '—' : f1(x.iz), ib: f1(x.ib) }));   // i18n-ignore: no value
+      if (x.breakerOk === false) bad.push(say('bad.breaker', { b: c.breaker, iz: x.iz == null ? '—' : f1(x.iz), ib: f1(x.ib) }));   // i18n-ignore: no value
+      if (x.dropOk === false) bad.push(say('bad.drop', { d: x.drop.percent.toFixed(1), limit: c.dropLimit }));
+      if (!x.minOk) bad.push(say('bad.min', { s: r.minSection }));
+      kit.rows.push(el('dt', {}, say('chosen')), el('dd', { className: bad.length ? 'bc-input-err' : 'bc-muted', 'data-mp-elchosen': '' },
+        bad.length ? bad.join(' ') : say('chosen.ok', { section: c.section, iz: f1(x.iz), drop: x.drop ? x.drop.percent.toFixed(1) + ' %' : say('nodrop') })));   // i18n-ignore: unit
+    }
+    if (!(c.length > 0)) kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-muted', 'data-mp-elnolength': '' }, say('nolength')));
+    kit.field('', kit.button(t('res.el.cd.size'), 'data-mp-elsizecircuits', () => {
+      let n = 0;
+      try { n = [...circuitPlan(writer(), R.devs).values()].filter((x) => x.result.need && x.result.grow).length; } catch (e) { console.error(e); return; }
+      if (!n) { A.host.status(t('res.el.cd.size.none')); return; }
+      A.commit(sizeCircuits(), { label: t('res.el.cd.size.label', { n }), verb: t('model.verb.changed') });
+    }));
+  }
   function elSchedules() {
     if (!A.S.on || !R.devs.length) return {};
-    return { devices: deviceSchedule(R.devs, A.S.data?.levels || [], { fmtLen: L, t }), circuits: circuitSchedule(R.devs, { units: A.units(), t }) };
+    let plan = null;
+    try { const w = writer(); plan = w ? circuitPlan(w, R.devs) : null; } catch (e) { console.error(e); }
+    return { devices: deviceSchedule(R.devs, A.S.data?.levels || [], { fmtLen: L, t }), circuits: circuitSchedule(R.devs, { units: A.units(), t, plan }) };
   }
   function elScheduleKeys(kind, i) {
     const k = A.kb();

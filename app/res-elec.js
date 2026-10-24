@@ -12,6 +12,15 @@
  *   placeDevice(spec) · changeDevice(guid, ch) · linkLight(switchGuid, lightGuid) · removeDevices(guids) → ops
  *   syncElectrical(w, storey)   devices on walls follow their wall (res-follow.js); a wall deleted leaves them where they were
  *   deviceSchedule(devs, levels, opts) · circuitSchedule(devs, opts) → { head, rows, total }
+ *   Circuits sized by NBR 5410 (elec/circuit.js, elec/nbr5410.js): each circuit named on devices can have its own entity
+ *   (IfcDistributionCircuit; IFC2X3 IfcElectricalCircuit, serving the building, its devices assigned to it) holding the design
+ *   (CadCraft_Circuit: Key, Phases, Use, PowerFactor, DemandFactor, Length, Method, Insulation, Ambient, Grouped, Arrangement,
+ *   Spacing, Soil, SectionMm2, BreakerA, DropLimit, ReducedNeutral); the voltage system is the project's
+ *   (CadCraft_ElectricalProject.VoltageSystem, default 127/220).
+ *   readElectricalProject(w) · setElectricalProject({ system }) → op
+ *   readCircuits(w) → Map(label → design + { id, guid }) · setCircuit(label, patch) → op · circuitPlan(w, devs?) → Map(label → { count,
+ *     watts, circuit, result }) with the design of elec/circuit.js · sizeCircuits() → op: the section and breaker of every circuit
+ *     that needs them (never smaller than chosen) · syncCircuitMembers(w): the devices of each circuit assigned to its entity
  *
  * IFC4: IfcOutlet (POWEROUTLET), IfcSwitchingDevice (TOGGLESWITCH, DIMMERSWITCH, MOMENTARYSWITCH), IfcSensor (MOVEMENTSENSOR),
  * IfcLightFixture (POINTSOURCE, SECURITYLIGHTING), IfcJunctionBox (POWER), IfcElectricDistributionBoard (DISTRIBUTIONBOARD);
@@ -24,10 +33,12 @@
 import { ModelWriter, round } from './model-write.js';
 import { readLevels } from './model-levels.js';
 import { readWalls } from './model-walls.js';
-import { ids, val } from './ifc-util.js';
+import { ids, val, deleteLine } from './ifc-util.js';
 import { t as tr } from './i18n.js';
 import { SYMBOLS } from './res-elec-symbols.js';
 import { isMetric } from './model-units.js';
+import { designCircuit, cableText, PHASES } from './elec/circuit.js';
+import { SECTIONS, METHOD_KEYS, DEFAULT_METHOD, BREAKERS, SYSTEMS, DEFAULT_SYSTEM } from './elec/nbr5410.js';
 
 export const ELEC_PSET = 'CadCraft_Electrical';
 const IN = 25.4;
@@ -193,6 +204,7 @@ export function placeDevice(spec) {
     w.upsertPset(id, ELEC_PSET, [['Level', 'IFCIDENTIFIER', s.level], ['Kind', 'IFCLABEL', s.kind], ['Circuit', 'IFCLABEL', String(s.circuit ?? '')], ['Load', 'IFCPOWERMEASURE', round(load, 3)],
       ['MountingHeight', 'IFCLENGTHMEASURE', round(w.u(height))], ['Wall', 'IFCIDENTIFIER', s.wall || ''], ['Side', 'IFCINTEGER', s.side < 0 ? -1 : 1], ['Offset', 'IFCLENGTHMEASURE', round(w.u(s.offset || 0))], ['Controls', 'IFCTEXT', '']]);
     writeDevice(w, { id, kind: s.kind, at: s.at || [0, 0], angle: s.angle || 0, wall: s.wall || '', side: s.side < 0 ? -1 : 1, offset: s.offset || 0, height }, walls);
+    syncCircuitMembers(w);
     return { id, ids: [id], made: new Map([[s.guid, id]]) };
   });
 }
@@ -217,6 +229,7 @@ export function changeDevice(guid, ch) {
     }
     if (rows.length) w.upsertPset(d.id, ELEC_PSET, rows);
     if (nx.height !== d.height) writeDevice(w, nx, readWalls(w, d.storey));
+    if (typeof ch.circuit === 'string') syncCircuitMembers(w);
     return { id: d.id, ids: [d.id] };
   });
 }
@@ -258,6 +271,139 @@ export function syncElectrical(w, storey) {
   return n;
 }
 
+// ------------------------------------------------------------------------------------------------------------ circuits (NBR 5410)
+export const CIRCUIT_PSET = 'CadCraft_Circuit', PROJECT_PSET = 'CadCraft_ElectricalProject';
+export const CIRCUIT_DEFAULTS = { phases: 'FN', use: '', pf: 1, demand: 1, length: 0, method: DEFAULT_METHOD, insulation: 'pvc', ambient: 0, grouped: 1, arrangement: '', spacing: 0, soil: 2.5, section: 0, breaker: 0, dropLimit: 4, reducedNeutral: false };
+const oneOf = (v, list, d) => (list.includes(String(v)) ? String(v) : d);
+const pos = (v, d = 0) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
+const projectId = (w) => { try { return ids(w.api, w.mid, 'IFCPROJECT')[0] ?? null; } catch (e) { return null; } };
+
+export function readElectricalProject(w) {
+  const p = projectId(w), ps = p ? w.readPset(p, PROJECT_PSET) : null;
+  return { system: oneOf(ps?.VoltageSystem, Object.keys(SYSTEMS), DEFAULT_SYSTEM) };
+}
+export function setElectricalProject(patch) {
+  return op((w) => {
+    const p = projectId(w);
+    if (!p) fail('model.err.gone');
+    if (!SYSTEMS[patch.system]) fail('res.err.elcircuit');
+    w.upsertPset(p, PROJECT_PSET, [['VoltageSystem', 'IFCLABEL', patch.system]]);
+    return { id: p, ids: [] };
+  });
+}
+
+/** The circuits that have an entity, by the label devices carry: the design as the file holds it (untrusted values are checked). */
+export function readCircuits(w) {
+  const out = new Map();
+  for (const cls of ['IFCDISTRIBUTIONCIRCUIT', 'IFCELECTRICALCIRCUIT']) {
+    let list = [];
+    try { list = ids(w.api, w.mid, cls); } catch (e) { continue; }
+    for (const id of list) {
+      const ps = w.readPset(id, CIRCUIT_PSET);
+      const label = String(ps?.Key ?? '');
+      if (!ps || !label || out.has(label)) continue;
+      const pf = Number(ps.PowerFactor), dm = Number(ps.DemandFactor);
+      out.set(label, {
+        id, guid: val(w.api.GetLine(w.mid, id, false).GlobalId), label,
+        phases: oneOf(ps.Phases, PHASES, 'FN'), use: oneOf(ps.Use, ['lighting', 'power'], ''), pf: pf > 0 && pf <= 1 ? pf : 1, demand: dm > 0 && dm <= 1 ? dm : 1,
+        length: pos(ps.Length) * w.unitMm / 1000, method: oneOf(ps.Method, METHOD_KEYS, DEFAULT_METHOD), insulation: oneOf(ps.Insulation, ['pvc', 'epr'], 'pvc'),
+        ambient: pos(ps.Ambient), grouped: Math.max(1, Math.round(pos(ps.Grouped, 1))), arrangement: oneOf(ps.Arrangement, ['', 'bundle'], ''), spacing: pos(ps.Spacing), soil: pos(ps.Soil, 2.5) || 2.5,
+        section: SECTIONS.includes(Number(ps.SectionMm2)) ? Number(ps.SectionMm2) : 0, breaker: BREAKERS.includes(Number(ps.BreakerA)) ? Number(ps.BreakerA) : 0,
+        dropLimit: pos(ps.DropLimit, 4) || 4, reducedNeutral: Number(ps.ReducedNeutral) === 1,
+      });
+    }
+  }
+  return out;
+}
+/** What devices on a circuit say about it before the design does: a three-phase outlet makes it a three-phase circuit. */
+const autoPhases = (devs) => (devs.some((d) => d.kind === 'socket.3ph') ? '3F' : 'FN');
+/** The circuit entity for a label, made when there is none (serving the building, with the phases its devices ask for). */
+function ensureCircuit(w, label) {
+  const have = readCircuits(w).get(label);
+  if (have) return have.id;
+  const id = w.v4 ? w.make('IFCDISTRIBUTIONCIRCUIT', w.guid(), w.ownerHistory(), w.L(label), null, null, null, 'ELECTRICAL') : w.make('IFCELECTRICALCIRCUIT', w.guid(), w.ownerHistory(), w.L(label), null, w.L('Circuit'));
+  w.upsertPset(id, CIRCUIT_PSET, [['Key', 'IFCLABEL', label], ['Phases', 'IFCLABEL', autoPhases(readDevices(w).filter((d) => d.kind !== 'board' && d.circuit === label))]]);
+  const b = ids(w.api, w.mid, 'IFCBUILDING')[0];
+  if (b) w.make('IFCRELSERVICESBUILDINGS', w.guid(), w.ownerHistory(), null, null, w.H(id), [w.H(b)]);
+  return id;
+}
+const CIRCUIT_ROWS = {
+  phases: (w, v) => ['Phases', 'IFCLABEL', v], use: (w, v) => ['Use', 'IFCLABEL', v], pf: (w, v) => ['PowerFactor', 'IFCREAL', round(v, 4)], demand: (w, v) => ['DemandFactor', 'IFCREAL', round(v, 4)],
+  length: (w, v) => ['Length', 'IFCLENGTHMEASURE', round(w.u(v * 1000))], method: (w, v) => ['Method', 'IFCLABEL', v], insulation: (w, v) => ['Insulation', 'IFCLABEL', v], ambient: (w, v) => ['Ambient', 'IFCREAL', round(v, 2)],
+  grouped: (w, v) => ['Grouped', 'IFCINTEGER', Math.round(v)], arrangement: (w, v) => ['Arrangement', 'IFCLABEL', v], spacing: (w, v) => ['Spacing', 'IFCREAL', round(v, 3)], soil: (w, v) => ['Soil', 'IFCREAL', round(v, 3)],
+  section: (w, v) => ['SectionMm2', 'IFCREAL', v], breaker: (w, v) => ['BreakerA', 'IFCREAL', v], dropLimit: (w, v) => ['DropLimit', 'IFCREAL', round(v, 3)], reducedNeutral: (w, v) => ['ReducedNeutral', 'IFCINTEGER', v ? 1 : 0],
+};
+const valid = {
+  phases: (v) => PHASES.includes(v), use: (v) => v === '' || v === 'lighting' || v === 'power', pf: (v) => v > 0 && v <= 1, demand: (v) => v > 0 && v <= 1, length: (v) => v >= 0 && v < 1e5,
+  method: (v) => METHOD_KEYS.includes(String(v)), insulation: (v) => v === 'pvc' || v === 'epr', ambient: (v) => v === 0 || (v >= 10 && v <= 80), grouped: (v) => v >= 1 && v <= 1000, arrangement: (v) => v === '' || v === 'bundle',
+  spacing: (v) => v >= 0 && v <= 100, soil: (v) => v >= 1 && v <= 10, section: (v) => v === 0 || SECTIONS.includes(v), breaker: (v) => v === 0 || BREAKERS.includes(v), dropLimit: (v) => v > 0 && v <= 100, reducedNeutral: () => true,
+};
+/** Change the design of the circuit named `label` (its entity is made on the first change). */
+export function setCircuit(label, patch) {
+  return op((w) => {
+    const name = String(label ?? '').trim().slice(0, 20);
+    if (!name) fail('res.err.elcircuit');
+    const rows = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!CIRCUIT_ROWS[k]) continue;
+      if (!valid[k](typeof v === 'string' && !['phases', 'use', 'method', 'insulation', 'arrangement'].includes(k) ? Number(v) : v)) fail('res.err.elcircuit');
+      rows.push(CIRCUIT_ROWS[k](w, v));
+    }
+    const id = ensureCircuit(w, name);
+    if (rows.length) w.upsertPset(id, CIRCUIT_PSET, rows);
+    syncCircuitMembers(w);
+    return { id, ids: [id] };
+  });
+}
+/** The devices of each circuit that has an entity assigned to it (one relation per circuit; none when the circuit is empty). */
+export function syncCircuitMembers(w) {
+  const circuits = readCircuits(w);
+  if (!circuits.size) return 0;
+  const devs = readDevices(w).filter((d) => d.kind !== 'board' && d.circuit);
+  const rels = new Map();
+  for (const rid of ids(w.api, w.mid, 'IFCRELASSIGNSTOGROUP')) { const r = w.api.GetLine(w.mid, rid, false), g = r.RelatingGroup?.value; if (g) { if (!rels.has(g)) rels.set(g, []); rels.get(g).push(rid); } }
+  let n = 0;
+  for (const c of circuits.values()) {
+    const want = devs.filter((d) => d.circuit === c.label).map((d) => d.id), have = rels.get(c.id) || [];
+    const same = have.length === (want.length ? 1 : 0) && (!want.length || (() => { const l = w.api.GetLine(w.mid, have[0], false); const got = (l.RelatedObjects || []).map((h) => h.value); return got.length === want.length && want.every((x) => got.includes(x)); })());
+    if (same) continue;
+    n++;
+    have.forEach((rid, i) => {
+      if (want.length && i === 0) { const l = w.touch(rid); l.RelatedObjects = want.map((x) => w.H(x)); w.write(l); } else { w.touch(rid); deleteLine(w.api, w.mid, rid); }
+    });
+    if (want.length && !have.length) w.make('IFCRELASSIGNSTOGROUP', w.guid(), w.ownerHistory(), null, null, want.map((x) => w.H(x)), null, w.H(c.id));
+  }
+  return n;
+}
+
+/** Every circuit that devices name, with what is on it and the design of elec/circuit.js for it. */
+export function circuitPlan(w, devs = readDevices(w)) {
+  const { system } = readElectricalProject(w), recs = readCircuits(w), plan = new Map();
+  const labels = [...new Set(devs.filter((d) => d.kind !== 'board' && d.circuit).map((d) => d.circuit))].sort(cmpTag);
+  for (const label of labels) {
+    const on = devs.filter((d) => d.kind !== 'board' && d.circuit === label);
+    const rec = recs.get(label) || { ...CIRCUIT_DEFAULTS, label, id: null, phases: autoPhases(on) };
+    const watts = on.reduce((a, d) => a + (d.load || 0), 0), autoUse = on.every((d) => isLight(d.kind)) ? 'lighting' : 'power';
+    const circuit = { ...rec, system, watts, use: rec.use || autoUse, ambient: rec.ambient > 0 ? rec.ambient : undefined };
+    plan.set(label, { label, id: rec.id, rec, count: on.length, watts, autoUse, circuit, result: designCircuit(circuit) });
+  }
+  return plan;
+}
+/** Chosen: the section and breaker every circuit that needs them gets (never smaller than chosen), one undo step. */
+export function sizeCircuits() {
+  return op((w) => {
+    const plan = circuitPlan(w), made = [];
+    for (const p of plan.values()) {
+      if (!p.result.need || !p.result.grow) continue;
+      const id = ensureCircuit(w, p.label);
+      w.upsertPset(id, CIRCUIT_PSET, [CIRCUIT_ROWS.section(w, p.result.need.section), CIRCUIT_ROWS.breaker(w, p.result.need.breaker)]);
+      made.push(id);
+    }
+    syncCircuitMembers(w);
+    return { id: made[0] ?? null, ids: made };
+  });
+}
+
 // ------------------------------------------------------------------------------------------------------------ schedules
 export function deviceSchedule(devs, levels, { fmtLen = (mm) => String(Math.round(mm)), t = tr } = {}) {
   const byGuid = new Map(devs.map((d) => [d.guid, d]));
@@ -265,7 +411,8 @@ export function deviceSchedule(devs, levels, { fmtLen = (mm) => String(Math.roun
   const watts = devs.reduce((s, d) => s + (d.load || 0), 0);
   return { head: [t('res.el.sch.tag'), t('res.el.sch.device'), t('res.el.sch.level'), t('res.el.sch.circuit'), t('res.el.sch.load'), t('res.el.sch.height'), t('res.el.sch.controls')], rows, total: [t('model.sch.total'), String(devs.length), '', '', String(Math.round(watts)), '', ''] };
 }
-export function circuitSchedule(devs, { units = 'ftin', t = tr } = {}) {
+export function circuitSchedule(devs, { units = 'ftin', t = tr, plan = null } = {}) {
+  if (plan && plan.size) return designSchedule(devs, plan, t);
   const map = new Map();
   for (const d of devs) {
     if (d.kind === 'board') continue;
@@ -279,4 +426,24 @@ export function circuitSchedule(devs, { units = 'ftin', t = tr } = {}) {
   const rows = list.map((r) => [r.circuit || t('res.el.nocircuit'), String(r.n), [...r.kinds].map(([k, n]) => n + ' × ' + t('res.el.kind.' + k)).join(', '), String(Math.round(r.watts)), (r.watts / r.volts).toFixed(1), String(r.volts)]);   // i18n-ignore: a count
   const watts = list.reduce((s, r) => s + r.watts, 0);
   return { head: [t('res.el.sch.circuit'), t('res.el.sch.count'), t('res.el.sch.devices'), t('res.el.sch.load'), t('res.el.sch.amps'), t('res.el.sch.volts')], rows, total: [t('model.sch.total'), String(list.reduce((s, r) => s + r.n, 0)), '', String(Math.round(watts)), '', ''] };
+}
+
+/** The circuit schedule with the design: the current, the voltage, the chosen conductors and breaker, the drop. */
+function designSchedule(devs, plan, t) {
+  const kinds = new Map();
+  for (const d of devs) { if (d.kind === 'board') continue; const c = d.circuit || ''; if (!kinds.has(c)) kinds.set(c, new Map()); kinds.get(c).set(d.kind, (kinds.get(c).get(d.kind) || 0) + 1); }
+  const labels = [...kinds.keys()].sort((a, b) => (a === '') - (b === '') || cmpTag(a, b));
+  const dash = '—';   // i18n-ignore: no value
+  const rows = labels.map((label) => {
+    const p = plan.get(label), k = kinds.get(label), n = [...k.values()].reduce((a, b) => a + b, 0);
+    const what = [...k].map(([kind, c]) => c + ' × ' + t('res.el.kind.' + kind)).join(', ');   // i18n-ignore: a count
+    const watts = devs.filter((d) => d.kind !== 'board' && (d.circuit || '') === label).reduce((a, d) => a + (d.load || 0), 0);
+    if (!p) return [label || t('res.el.nocircuit'), String(n), what, String(Math.round(watts)), dash, dash, dash, dash, dash];
+    const c = p.circuit, r = p.result, now = r.now;
+    return [label, String(n), what, String(Math.round(watts)), r.error === 'load' ? dash : r.ib.toFixed(1), String(r.volts), c.section > 0 ? cableText(c, c.section, { reducedNeutral: c.reducedNeutral }) : dash,
+      c.breaker > 0 ? c.breaker + ' A' : dash, now?.drop ? now.drop.percent.toFixed(1) + ' %' : dash];   // i18n-ignore: units
+  });
+  const total = devs.filter((d) => d.kind !== 'board').reduce((a, d) => a + (d.load || 0), 0);
+  return { head: [t('res.el.sch.circuit'), t('res.el.sch.count'), t('res.el.sch.devices'), t('res.el.sch.load'), t('res.el.sch.amps'), t('res.el.sch.volts'), t('res.el.sch.cable'), t('res.el.sch.breaker'), t('res.el.sch.drop')],
+    rows, total: [t('model.sch.total'), String(devs.filter((d) => d.kind !== 'board').length), '', String(Math.round(total)), '', '', '', '', ''] };
 }
