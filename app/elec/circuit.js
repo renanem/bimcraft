@@ -6,7 +6,7 @@
  *
  *   circuit = { watts, apparent (the load is VA, not W: the power factor is not divided by), demand (default 1), pf (default 1), phases, system, use ('lighting' | 'power'), length (m; 0 = not known),
  *     method (a key of METHODS), insulation ('pvc' | 'epr'), ambient (°C; air, or soil for method D), grouped (circuits in the
- *     same conduit or bundle, this one included), arrangement ('' | 'bundle'), spacing (m between buried conduits),
+ *     same conduit or bundle, this one included), conductor ('flex' flexible, the default, or 'rigid': the resistance the drop uses), arrangement ('' | 'bundle'), spacing (m between buried conduits),
  *     soil (K·m/W, method D), section (mm², chosen; 0 = none yet), breaker (A, chosen; 0 = none yet), dropLimit (% of the
  *     voltage; default 4, the limit for terminal circuits), reducedNeutral }
  *   phases: 'FN' one phase and neutral · 'FF' two phases · '3F' three phases, no neutral · '3FN' three phases and neutral (balanced)
@@ -39,7 +39,7 @@ export function dropOf(c, section) {
   if (!(c.length > 0)) return null;
   const ib = designCurrent(c), pf = c.pf > 0 && c.pf <= 1 ? c.pf : 1, sin = Math.sqrt(Math.max(0, 1 - pf * pf));
   const b = three(c.phases) ? Math.sqrt(3) : 2;
-  const volts = b * ib * (c.length / 1000) * (resistance(section, c.insulation || 'pvc') * pf + REACTANCE * sin);
+  const volts = b * ib * (c.length / 1000) * (resistance(section, c.insulation || 'pvc', c.conductor || 'flex') * pf + REACTANCE * sin);
   return { volts, percent: (volts / voltsOf(c.system, c.phases)) * 100 };
 }
 

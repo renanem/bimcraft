@@ -76,7 +76,12 @@ ok(T.groupFactor(61, '', 3, 0.25) === 0.85 && T.groupFactor(61, '', 2, 0) === 0.
 ok(T.minSection('lighting') === 1.5 && T.minSection('power') === 2.5, 'Tabela 47: 1.5 mm² for lighting, 2.5 mm² for power circuits (outlets included)');
 ok(T.neutralSection(25) === 25 && T.neutralSection(70) === 70 && T.neutralSection(70, true) === 35 && T.neutralSection(400, true) === 185 && T.neutralSection(35, true) === 25, 'Tabela 48: a reduced neutral only above 25 mm² and only when asked: 70 → 35, 400 → 185');
 ok(T.protectiveSection(10) === 10 && T.protectiveSection(16) === 16 && T.protectiveSection(25) === 16 && T.protectiveSection(35) === 16 && T.protectiveSection(70) === 35, 'Tabela 58: up to 16 mm² as the phase, up to 35 mm² 16 mm², above half');
-ok(near(T.resistance(2.5, 'pvc'), 7.41 * (1 + 0.00393 * 50), 1e-9) && near(T.resistance(2.5, 'epr'), 7.41 * (1 + 0.00393 * 70), 1e-9), 'conductor resistance at 70 °C (PVC) and 90 °C (EPR): 7.41 Ω/km at 20 °C is 8.87 and 9.45');
+ok(near(T.resistance(2.5, 'pvc', 'rigid'), 7.41 * (1 + 0.00393 * 50), 1e-9) && near(T.resistance(2.5, 'epr', 'rigid'), 7.41 * (1 + 0.00393 * 70), 1e-9) && near(T.resistance(2.5, 'pvc'), 7.98 * (1 + 0.00393 * 50), 1e-9) && near(T.resistance(2.5, 'epr', 'flex'), 7.98 * (1 + 0.00393 * 70), 1e-9),
+  'conductor resistance at 70 °C (PVC) and 90 °C (EPR): a rigid 2.5 mm² (7.41 Ω/km at 20 °C) is 8.87 and 9.45, a flexible one (7.98, the default) 9.55 and 10.17');
+const FLEX = { 0.5: 39.0, 0.75: 26.0, 1: 19.5, 1.5: 13.3, 2.5: 7.98, 4: 4.95, 6: 3.30, 10: 1.91, 16: 1.21, 25: 0.780, 35: 0.554, 50: 0.386, 70: 0.272, 95: 0.206, 120: 0.161, 150: 0.129, 185: 0.106, 240: 0.0801 };
+ok(Object.entries(FLEX).every(([sct, r]) => T.RESISTANCE_FLEX[sct] === r) && Object.keys(T.RESISTANCE_FLEX).length === 18 && T.resistance(300, 'pvc') === T.resistance(300, 'pvc', 'rigid') && T.SECTIONS.every((sct) => T.RESISTANCE_20[sct] > 0),
+  'the flexible resistances as a 750 V flexible cable maker prints them, 0.5 to 240 mm²; above 240 mm² the rigid figure');
+ok(Object.keys(FLEX).every((sct) => T.resistance(Number(sct), 'pvc') >= T.resistance(Number(sct), 'pvc', 'rigid') * 0.995 && T.resistance(Number(sct), 'pvc') <= T.resistance(Number(sct), 'pvc', 'rigid') * 1.11), 'a flexible conductor has the resistance of a rigid one or up to 10 % more (50 mm² is 0.3 % under: the tables round)');
 
 console.log('== a circuit worked by hand');
 const base = { watts: 500, pf: 1, phases: 'FN', system: '127/220', use: 'lighting', length: 20, method: '7', insulation: 'pvc', ambient: 30, grouped: 1 };
@@ -89,7 +94,7 @@ r = C.designCircuit({ ...base, watts: 1800, use: 'power', grouped: 4, length: 15
 ok(r.need.section === 4 && r.need.breaker === 16 && near(r.need.iz, 32 * 0.65, 1e-9), 'a fourth circuit in the conduit (0.65): 2.5 mm² gives 15.6 A, short of the 16 A breaker, so 4 mm² (20.8 A)');
 r = C.designCircuit({ ...base, watts: 2000, use: 'power', length: 60 });
 ok(r.need.section === 10 && r.need.breaker === 16 && near(r.need.drop.percent, 2 * (2000 / 127) * 0.06 * T.resistance(10, 'pvc') / 127 * 100, 1e-9) && r.need.drop.percent <= 4,
-  '2000 W over 60 m: 6 mm² would drop 6.3 %, so 10 mm² (3.3 %), the breaker 16 A', JSON.stringify(r.need));
+  '2000 W over 60 m: 6 mm² would drop 5.9 %, so 10 mm² (3.4 %), the breaker 16 A', JSON.stringify(r.need));
 const motor = { ...base, watts: 11000, phases: '3F', pf: 0.85, insulation: 'epr', use: 'power', length: 0, system: '127/220' };
 r = C.designCircuit(motor);
 ok(near(r.ib, 11000 / (Math.sqrt(3) * 220 * 0.85), 1e-9) && r.volts === 220 && r.loaded === 3 && r.need.section === 6 && r.need.breaker === 40 && near(r.need.iz, 48, 1e-9) && r.need.drop === null, '11 kW three-phase at 220 V, power factor 0.85, EPR: 34.0 A, 6 mm² (48 A), a 40 A breaker; no length, no drop checked');
@@ -114,10 +119,10 @@ const maker = { 1.5: [23.3, 27.6, 20.2, 23.9], 2.5: [14.3, 16.9, 12.4, 14.7], 4:
 let worst = 0;
 for (const [s, row] of Object.entries(maker)) [['FN', 0.8], ['FN', 0.95], ['3F', 0.8], ['3F', 0.95]].forEach(([ph, pf], i) => {
   // 1 A over 1 km: watts that make 1 A
-  const c = { watts: (ph === 'FN' ? 127 : Math.sqrt(3) * 220) * pf, pf, phases: ph, system: '127/220', length: 1000, insulation: 'pvc' };
+  const c = { watts: (ph === 'FN' ? 127 : Math.sqrt(3) * 220) * pf, pf, phases: ph, system: '127/220', length: 1000, insulation: 'pvc', conductor: 'rigid' };
   worst = Math.max(worst, Math.abs(C.dropOf(c, Number(s)).volts / row[i] - 1));
 });
-ok(worst < 0.04, 'the voltage drop (R at 70 °C and 0.1 Ω/km) agrees with a maker\'s V/A·km table within 4 % from 1.5 to 240 mm² (' + (worst * 100).toFixed(1) + ' %)');
+ok(worst < 0.04, 'the voltage drop of a rigid conductor (R at 70 °C and 0.1 Ω/km) agrees with a maker\'s V/A·km table within 4 % from 1.5 to 240 mm² (' + (worst * 100).toFixed(1) + ' %); a flexible one drops up to 10 % more');
 
 // loads in VA or in W, the breakers of 70 and 90 A, the conventional trip current
 r = C.designCircuit({ ...base, watts: 1000, pf: 0.8, use: 'power' });
@@ -170,7 +175,7 @@ ok(rec2 && rec2.grouped === 4 && near(rec2.length, 25, 1e-6) && rec2.ambient ===
 plan = EL.circuitPlan(W());
 const r2 = plan.get('2').result;
 ok(near(r2.kTemp, 0.87) && near(r2.kGroup, 0.65) && r2.need.section === 4 && r2.need.breaker === 16 && near(r2.need.iz, 32 * 0.87 * 0.65, 1e-9) && near(r2.need.drop.percent, 2 * (1800 / 127) * 0.025 * T.resistance(4, 'pvc') / 127 * 100, 1e-9),
-  'at 40 °C (0.87) with four circuits together (0.65) 2.5 mm² carries 13.6 A: 4 mm² (18.1 A), 16 A, a drop of 3.1 %', JSON.stringify(r2.need));
+  'at 40 °C (0.87) with four circuits together (0.65) 2.5 mm² carries 13.6 A: 4 mm² (18.1 A), 16 A, a drop of 3.3 %', JSON.stringify(r2.need));
 for (const [patch, what] of [[{ phases: 'XX' }, 'a phase arrangement that is none'], [{ section: 3 }, 'a section not in the tables'], [{ pf: 1.5 }, 'a power factor above 1'], [{ method: '99' }, 'an installation method that is none'], [{ ambient: 5 }, 'a temperature under 10 °C'], [{ breaker: 17 }, 'a breaker rating not in the list']]) {
   key = ''; try { ed.modelChange(EL.setCircuit('2', patch)); } catch (e) { key = e.key; }
   ok(key === 'res.err.elcircuit', what + ': refused');
@@ -203,7 +208,7 @@ ed.undo();
 D = EL.readDevices(W());
 const sc = EL.circuitSchedule(D, { units: 'mm', plan: EL.circuitPlan(W()) });
 const row2 = sc.rows.find((x) => x[0] === '2');
-ok(sc.head.length === 9 && row2 && row2[1] === '3' && row2[3] === '1800' && row2[4] === '14.2' && row2[5] === '127' && row2[6] === '1 × 4 + N 4 + PE 4 mm²' && row2[7] === '16 A' && row2[8] === '3.1 %', 'the circuit schedule with the design: circuit 2 is 1800 W, 14.2 A at 127 V, 1 × 4 + N 4 + PE 4 mm², 16 A, 3.1 %', JSON.stringify(row2));
+ok(sc.head.length === 9 && row2 && row2[1] === '3' && row2[3] === '1800' && row2[4] === '14.2' && row2[5] === '127' && row2[6] === '1 × 4 + N 4 + PE 4 mm²' && row2[7] === '16 A' && row2[8] === '3.3 %', 'the circuit schedule with the design: circuit 2 is 1800 W, 14.2 A at 127 V, 1 × 4 + N 4 + PE 4 mm², 16 A, 3.3 %', JSON.stringify(row2));
 ok(EL.circuitSchedule(D, { units: 'ftin' }).head.length === 6, 'without a plan the schedule is the old one (six columns)');
 // the file read back
 const eng2 = await quiet(IfcModel.create)(WebIFC, null);

@@ -16,7 +16,8 @@
  *   soilFactor(K·m/W) → Table 41 (2.5 is the reference; a value between listed ones takes the next higher resistivity)
  *   groupFactor(method, arrangement, circuits, spacing) → Table 42 (rows 1, 2, 3) or Table 45 (buried conduits, 2 to 6 circuits)
  *   minSection(use) → Table 47 · neutralSection(S) → Table 48 · protectiveSection(S) → Table 58
- *   RESISTANCE_20[S] (Ω/km, class 2 copper, IEC 60228) · BREAKERS (A) · SYSTEMS (voltage systems)
+ *   RESISTANCE_20[S] (Ω/km, rigid class 2 copper, IEC 60228) · RESISTANCE_FLEX[S] (flexible, classes 4 and 5, 0.5 to 240 mm²)
+ *   BREAKERS (A) · SYSTEMS (voltage systems)
  */
 export const SECTIONS = [0.5, 0.75, 1, 1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300, 400, 500, 630, 800, 1000];
 
@@ -167,9 +168,14 @@ export const protectiveSection = (s) => (s <= 16 ? s : s <= 35 ? 16 : s / 2);
 // DC resistance at 20 °C of class 2 copper conductors, Ω/km (IEC 60228, the same figures as ABNT NBR NM 280)
 export const RESISTANCE_20 = { 0.5: 36.0, 0.75: 24.5, 1: 18.1, 1.5: 12.1, 2.5: 7.41, 4: 4.61, 6: 3.08, 10: 1.83, 16: 1.15, 25: 0.727, 35: 0.524, 50: 0.387, 70: 0.268, 95: 0.193, 120: 0.153, 150: 0.124,
   185: 0.0991, 240: 0.0754, 300: 0.0601, 400: 0.0470, 500: 0.0366, 630: 0.0283, 800: 0.0221, 1000: 0.0176 };
+// the same for flexible conductors (ABNT NBR NM 280 classes 4 and 5): the maximum resistance a maker's table of a 750 V flexible cable gives
+export const RESISTANCE_FLEX = { 0.5: 39.0, 0.75: 26.0, 1: 19.5, 1.5: 13.3, 2.5: 7.98, 4: 4.95, 6: 3.30, 10: 1.91, 16: 1.21, 25: 0.780, 35: 0.554, 50: 0.386, 70: 0.272, 95: 0.206, 120: 0.161, 150: 0.129, 185: 0.106, 240: 0.0801 };
+export const CONDUCTORS = ['flex', 'rigid'];
 export const COPPER_ALPHA = 0.00393;   // per °C
-/** Conductor resistance Ω/km at the insulation's highest working temperature (what a cable carries at its rated current). */
-export const resistance = (section, insulation) => RESISTANCE_20[section] * (1 + COPPER_ALPHA * (INSULATIONS[insulation].maxC - 20));
+/** Conductor resistance Ω/km at the insulation's highest working temperature (what a cable carries at its rated current): of a
+ *  flexible conductor (the default, the larger) or a rigid one; above 240 mm² there is no flexible figure here, so the rigid one. */
+export const resistance = (section, insulation, conductor = 'flex') =>
+  ((conductor === 'rigid' ? RESISTANCE_20[section] : RESISTANCE_FLEX[section] ?? RESISTANCE_20[section]) * (1 + COPPER_ALPHA * (INSULATIONS[insulation].maxC - 20)));
 export const REACTANCE = 0.1;   // Ω/km, conductors in a conduit; with it the voltage drop agrees with the makers' V/A·km tables within about 3 %
 
 /** Circuit breaker ratings (A) the sizing chooses among: the IEC 60898 preferred values, 70 and 90 A (made by some makers only: the

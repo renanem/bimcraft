@@ -870,6 +870,7 @@ export function mountRes(modelUi) {
     kit.field(t('res.el.cd.length'), kit.lenInput(c.length * 1000, 'data-mp-ellength', (mm) => set({ length: mm / 1000 }), { allowZero: true }));
     kit.field(t('res.el.cd.method'), opt(METHOD_KEYS.map((k) => [k, t('res.el.method.' + k)]), c.method, 'data-mp-elmethod', (v) => set({ method: v })));
     kit.field(t('res.el.cd.insulation'), opt([['pvc', t('res.el.cd.ins.pvc')], ['epr', t('res.el.cd.ins.epr')]], c.insulation, 'data-mp-elins', (v) => set({ insulation: v })));
+    kit.field(t('res.el.cd.conductor'), opt([['flex', t('res.el.cd.cond.flex')], ['rigid', t('res.el.cd.cond.rigid')]], c.conductor, 'data-mp-elconductor', (v) => set({ conductor: v })));
     kit.field(t('res.el.cd.ambient'), num(p.rec.ambient, 'data-mp-elambient', (v) => set({ ambient: v }), t('res.el.cd.ambient.auto')));
     kit.field(t('res.el.cd.grouped'), num(c.grouped > 1 ? c.grouped : '', 'data-mp-elgrouped', (v) => set({ grouped: Math.max(1, Math.round(v)) }), '1'));
     const ref = METHODS[c.method]?.ref, grp = METHODS[c.method]?.group;
