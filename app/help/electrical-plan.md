@@ -45,6 +45,18 @@ BimCraft shows the **Design current**, and what the circuit **Needs**: the small
 
 Choose the **Section** and the **Breaker** yourself, or click {{ui:Size the circuits}}: it fills them for every circuit that needs it, as one step you can undo, and never makes a chosen section or breaker smaller. A choice that does not hold is said in red: too little current capacity, a breaker the cable cannot carry, a drop over the limit, a section under the smallest. The circuit schedule then shows the current, the conductors (for example 1 × 4 + N 4 + PE 4 mm²), the breaker and the drop.
 
+### The conduit
+
+For the methods in a conduit (1 to 8, and 61 and 61A buried), choose a **Conduit** family and, if you like, its size. BimCraft then gives the fill: the sum of the cross-sections of the conductors (the phases, the neutral and the protective one, by their outside diameter, insulation included) over the conduit's inside cross-section, against what NBR 5410 allows: **53 %** for one cable in the conduit, **31 %** for two, **40 %** for three or more. With **The smallest that fits**, it says the smallest size of the family that takes them. When **Circuits together** is more than one, the other circuits in the conduit are taken to have the same cables as this one.
+
+The dimensions are the makers' own, from their catalogues, and the pages are named in the circuit's Properties:
+
+- PVC conduits (threaded and solvent-weld): Amanco Wavin, ficha técnica "Eletroduto Rígido Soldável e Roscável", pages 6, 8 and 9.
+- Steel conduits (electrolytic heavy, NBR 13057; hot-dip galvanised RIR, NBR 5597): Elecon catalogue, pages 5 and 7.
+- Cables: Corfio, Cabo Flexível BWF 750 V, Catálogo de Produtos, page 5 (outside diameter of each section).
+
+The makers do not print the conduits' inside diameter: BimCraft takes the outside less twice the wall (the smaller outside diameter where the maker gives a range), which is on the safe side. Another maker's conduit or cable differs by a few per cent: check the one you specify. The cable table is for PVC-insulated flexible cables of 0.5 to 240 mm²; for EPR or XLPE cables, or larger sections, the fill is shown as pending rather than guessed. Cable trays are not sized here: their fill depends on the tray, the layout and the ventilation, not on these percentages.
+
 Each circuit you design is an IfcDistributionCircuit in the IFC file (IfcElectricalCircuit in IFC2X3) with its devices assigned to it and its design in `CadCraft_Circuit`.
 
 :::note

@@ -14,7 +14,7 @@
  *   deviceSchedule(devs, levels, opts) · circuitSchedule(devs, opts) → { head, rows, total }
  *   Circuits sized by NBR 5410 (elec/circuit.js, elec/nbr5410.js): each circuit named on devices can have its own entity
  *   (IfcDistributionCircuit; IFC2X3 IfcElectricalCircuit, serving the building, its devices assigned to it) holding the design
- *   (CadCraft_Circuit: Key, Phases, Use, LoadUnit (W | VA), PowerFactor, DemandFactor, Length, Method, Insulation, Conductor (flex | rigid), Ambient, Grouped, Arrangement,
+ *   (CadCraft_Circuit: Key, Phases, Use, LoadUnit (W | VA), PowerFactor, DemandFactor, Length, Method, Insulation, Conductor (flex | rigid), ConduitFamily, ConduitSize, Ambient, Grouped, Arrangement,
  *   Spacing, Soil, SectionMm2, BreakerA, DropLimit, ReducedNeutral); the voltage system is the project's
  *   (CadCraft_ElectricalProject.VoltageSystem, default 127/220).
  *   readElectricalProject(w) · setElectricalProject({ system }) → op
@@ -39,6 +39,7 @@ import { SYMBOLS } from './res-elec-symbols.js';
 import { isMetric } from './model-units.js';
 import { designCircuit, cableText, PHASES } from './elec/circuit.js';
 import { SECTIONS, METHOD_KEYS, DEFAULT_METHOD, BREAKERS, SYSTEMS, DEFAULT_SYSTEM } from './elec/nbr5410.js';
+import { CONDUITS, CONDUIT_FAMILIES, conductorsOf, fillOf, smallestConduit } from './elec/conduits.js';
 
 export const ELEC_PSET = 'CadCraft_Electrical';
 const IN = 25.4;
@@ -273,7 +274,7 @@ export function syncElectrical(w, storey) {
 
 // ------------------------------------------------------------------------------------------------------------ circuits (NBR 5410)
 export const CIRCUIT_PSET = 'CadCraft_Circuit', PROJECT_PSET = 'CadCraft_ElectricalProject';
-export const CIRCUIT_DEFAULTS = { phases: 'FN', use: '', apparent: false, pf: 1, demand: 1, length: 0, method: DEFAULT_METHOD, insulation: 'pvc', conductor: 'flex', ambient: 0, grouped: 1, arrangement: '', spacing: 0, soil: 2.5, section: 0, breaker: 0, dropLimit: 4, reducedNeutral: false };
+export const CIRCUIT_DEFAULTS = { phases: 'FN', use: '', apparent: false, pf: 1, demand: 1, length: 0, method: DEFAULT_METHOD, insulation: 'pvc', conductor: 'flex', conduit: '', conduitSize: '', ambient: 0, grouped: 1, arrangement: '', spacing: 0, soil: 2.5, section: 0, breaker: 0, dropLimit: 4, reducedNeutral: false };
 const oneOf = (v, list, d) => (list.includes(String(v)) ? String(v) : d);
 const pos = (v, d = 0) => (Number.isFinite(Number(v)) && Number(v) >= 0 && v !== '' && v !== null ? Number(v) : d);
 const projectId = (w) => { try { return ids(w.api, w.mid, 'IFCPROJECT')[0] ?? null; } catch (e) { return null; } };
@@ -306,7 +307,7 @@ export function readCircuits(w) {
       out.set(label, {
         id, guid: val(w.api.GetLine(w.mid, id, false).GlobalId), label,
         phases: oneOf(ps.Phases, PHASES, 'FN'), use: oneOf(ps.Use, ['lighting', 'power'], ''), apparent: ps.LoadUnit === 'VA', pf: pf > 0 && pf <= 1 ? pf : 1, demand: dm > 0 && dm <= 1 ? dm : 1,
-        length: pos(ps.Length) * w.unitMm / 1000, method: oneOf(ps.Method, METHOD_KEYS, DEFAULT_METHOD), insulation: oneOf(ps.Insulation, ['pvc', 'epr'], 'pvc'), conductor: oneOf(ps.Conductor, ['flex', 'rigid'], 'flex'),
+        length: pos(ps.Length) * w.unitMm / 1000, method: oneOf(ps.Method, METHOD_KEYS, DEFAULT_METHOD), insulation: oneOf(ps.Insulation, ['pvc', 'epr'], 'pvc'), conductor: oneOf(ps.Conductor, ['flex', 'rigid'], 'flex'), conduit: oneOf(ps.ConduitFamily, ['', ...CONDUIT_FAMILIES], ''), conduitSize: String(ps.ConduitSize || ''),
         ambient: pos(ps.Ambient), grouped: Math.max(1, Math.round(pos(ps.Grouped, 1))), arrangement: oneOf(ps.Arrangement, ['', 'bundle'], ''), spacing: pos(ps.Spacing), soil: pos(ps.Soil, 2.5) || 2.5,
         section: SECTIONS.includes(Number(ps.SectionMm2)) ? Number(ps.SectionMm2) : 0, breaker: BREAKERS.includes(Number(ps.BreakerA)) ? Number(ps.BreakerA) : 0,
         dropLimit: pos(ps.DropLimit, 4) || 4, reducedNeutral: Number(ps.ReducedNeutral) === 1,
@@ -329,13 +330,13 @@ function ensureCircuit(w, label) {
 }
 const CIRCUIT_ROWS = {
   phases: (w, v) => ['Phases', 'IFCLABEL', v], loadUnit: (w, v) => ['LoadUnit', 'IFCLABEL', v], use: (w, v) => ['Use', 'IFCLABEL', v], pf: (w, v) => ['PowerFactor', 'IFCREAL', round(v, 4)], demand: (w, v) => ['DemandFactor', 'IFCREAL', round(v, 4)],
-  length: (w, v) => ['Length', 'IFCLENGTHMEASURE', round(w.u(v * 1000))], method: (w, v) => ['Method', 'IFCLABEL', v], insulation: (w, v) => ['Insulation', 'IFCLABEL', v], conductor: (w, v) => ['Conductor', 'IFCLABEL', v], ambient: (w, v) => ['Ambient', 'IFCREAL', round(v, 2)],
+  length: (w, v) => ['Length', 'IFCLENGTHMEASURE', round(w.u(v * 1000))], method: (w, v) => ['Method', 'IFCLABEL', v], insulation: (w, v) => ['Insulation', 'IFCLABEL', v], conductor: (w, v) => ['Conductor', 'IFCLABEL', v], conduit: (w, v) => ['ConduitFamily', 'IFCLABEL', v], conduitSize: (w, v) => ['ConduitSize', 'IFCLABEL', v], ambient: (w, v) => ['Ambient', 'IFCREAL', round(v, 2)],
   grouped: (w, v) => ['Grouped', 'IFCINTEGER', Math.round(v)], arrangement: (w, v) => ['Arrangement', 'IFCLABEL', v], spacing: (w, v) => ['Spacing', 'IFCREAL', round(v, 3)], soil: (w, v) => ['Soil', 'IFCREAL', round(v, 3)],
   section: (w, v) => ['SectionMm2', 'IFCREAL', v], breaker: (w, v) => ['BreakerA', 'IFCREAL', v], dropLimit: (w, v) => ['DropLimit', 'IFCREAL', round(v, 3)], reducedNeutral: (w, v) => ['ReducedNeutral', 'IFCINTEGER', v ? 1 : 0],
 };
 const valid = {
   phases: (v) => PHASES.includes(v), loadUnit: (v) => v === 'W' || v === 'VA', use: (v) => v === '' || v === 'lighting' || v === 'power', pf: (v) => v > 0 && v <= 1, demand: (v) => v > 0 && v <= 1, length: (v) => v >= 0 && v < 1e5,
-  method: (v) => METHOD_KEYS.includes(String(v)), insulation: (v) => v === 'pvc' || v === 'epr', conductor: (v) => v === 'flex' || v === 'rigid', ambient: (v) => v === 0 || (v >= 10 && v <= 80), grouped: (v) => v >= 1 && v <= 1000, arrangement: (v) => v === '' || v === 'bundle',
+  method: (v) => METHOD_KEYS.includes(String(v)), insulation: (v) => v === 'pvc' || v === 'epr', conductor: (v) => v === 'flex' || v === 'rigid', conduit: (v) => v === '' || CONDUIT_FAMILIES.includes(v), conduitSize: (v) => v === '' || CONDUIT_FAMILIES.some((f) => CONDUITS[f].sizes.some((x) => x.key === v)), ambient: (v) => v === 0 || (v >= 10 && v <= 80), grouped: (v) => v >= 1 && v <= 1000, arrangement: (v) => v === '' || v === 'bundle',
   spacing: (v) => v >= 0 && v <= 100, soil: (v) => v >= 1 && v <= 10, section: (v) => v === 0 || SECTIONS.includes(v), breaker: (v) => v === 0 || BREAKERS.includes(v), dropLimit: (v) => v > 0 && v <= 100, reducedNeutral: () => true,
 };
 /** Change the design of the circuit named `label` (its entity is made on the first change). */
@@ -346,7 +347,7 @@ export function setCircuit(label, patch) {
     const rows = [];
     for (const [k, v] of Object.entries(patch)) {
       if (!CIRCUIT_ROWS[k]) continue;
-      if (!valid[k](typeof v === 'string' && !['phases', 'use', 'method', 'insulation', 'arrangement', 'loadUnit', 'conductor'].includes(k) ? Number(v) : v)) fail('res.err.elcircuit');
+      if (!valid[k](typeof v === 'string' && !['phases', 'use', 'method', 'insulation', 'arrangement', 'loadUnit', 'conductor', 'conduit', 'conduitSize'].includes(k) ? Number(v) : v)) fail('res.err.elcircuit');
       rows.push(CIRCUIT_ROWS[k](w, v));
     }
     const id = ensureCircuit(w, name);
@@ -385,9 +386,25 @@ export function circuitPlan(w, devs = readDevices(w)) {
     const rec = recs.get(label) || { ...CIRCUIT_DEFAULTS, label, id: null, phases: autoPhases(on) };
     const watts = on.reduce((a, d) => a + (d.load || 0), 0), autoUse = on.every((d) => isLight(d.kind)) ? 'lighting' : 'power';
     const circuit = { ...rec, system, watts, use: rec.use || autoUse, ambient: rec.ambient > 0 ? rec.ambient : undefined };
-    plan.set(label, { label, id: rec.id, rec, count: on.length, watts, autoUse, circuit, result: designCircuit(circuit) });
+    const result = designCircuit(circuit);
+    plan.set(label, { label, id: rec.id, rec, count: on.length, watts, autoUse, circuit, result, conduit: conduitCheck(circuit, result) });
   }
   return plan;
+}
+/** The methods of installation that run in a conduit (Tabela 33: 1 to 8, buried 61 and 61A). */
+export const IN_CONDUIT = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '61', '61A']);
+/** The fill of the conduit a circuit is in, for the section chosen (else the one it needs), the other circuits in it taken as the same:
+ *  { family, size (the one chosen, or null), fill, smallest, section, together } | { pending: 'cable' } | null (no conduit asked, or not in a conduit). */
+export function conduitCheck(c, result) {
+  if (!c.conduit || !IN_CONDUIT.has(String(c.method))) return null;
+  const section = c.section > 0 ? c.section : result.need?.section;
+  if (!section) return null;
+  if (c.insulation === 'epr') return { pending: 'cable', family: c.conduit, section };   // the catalogue's cables are PVC-insulated
+  const one = conductorsOf(c.phases, section, c.reducedNeutral), list = Array.from({ length: Math.max(1, c.grouped || 1) }, () => one).flat();
+  const fam = CONDUITS[c.conduit], size = fam.sizes.find((x) => x.key === c.conduitSize) || null;
+  const smallest = smallestConduit(c.conduit, list), probe = fillOf(fam.sizes[0], list);
+  if (probe.pending) return { pending: probe.pending, family: c.conduit, section };
+  return { family: c.conduit, size, fill: size ? fillOf(size, list) : null, smallest, section, together: Math.max(1, c.grouped || 1), conductors: list.length };
 }
 /** Chosen: the section and breaker every circuit that needs them gets (never smaller than chosen), one undo step. */
 export function sizeCircuits() {

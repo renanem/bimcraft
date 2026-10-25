@@ -56,8 +56,9 @@ import { modelTriangles, projectView, elevationDirs } from './res-views.js';
 import { buildSet, setPdf, sheetSvg, PAPERS, readSectionLines, placeSectionLine, changeSectionLine, removeSectionLines, sectionDir } from './res-sheets.js';
 import { viewerToPlan } from './model-plan.js';
 import { DEVICES, symbolPlan, symbolScale, wallSpot, readDevices, placeDevice, changeDevice, linkLight, removeDevices, deviceSchedule, circuitSchedule, isLight, isSwitch,
-  circuitPlan, setCircuit, sizeCircuits, setElectricalProject, readElectricalProject } from './res-elec.js';
+  circuitPlan, setCircuit, sizeCircuits, setElectricalProject, readElectricalProject, IN_CONDUIT } from './res-elec.js';
 import { SECTIONS, METHOD_KEYS, METHODS, BREAKERS, SYSTEMS, SPACINGS } from './elec/nbr5410.js';
+import { CONDUITS, CONDUIT_FAMILIES, CABLE_SOURCE, SOURCES as CONDUIT_SOURCES } from './elec/conduits.js';
 import { PHASES, cableText } from './elec/circuit.js';
 import { GROUPS as EL_GROUPS, SYMBOLS as EL_SYMBOLS } from './res-elec-symbols.js';
 import { counterCabinets, counterRuns, readCountertops, countertopState, placeCountertop, changeCountertop, fitCountertop, removeCountertops, COUNTER_DEFAULTS } from './res-counter.js';
@@ -873,6 +874,10 @@ export function mountRes(modelUi) {
     kit.field(t('res.el.cd.conductor'), opt([['flex', t('res.el.cd.cond.flex')], ['rigid', t('res.el.cd.cond.rigid')]], c.conductor, 'data-mp-elconductor', (v) => set({ conductor: v })));
     kit.field(t('res.el.cd.ambient'), num(p.rec.ambient, 'data-mp-elambient', (v) => set({ ambient: v }), t('res.el.cd.ambient.auto')));
     kit.field(t('res.el.cd.grouped'), num(c.grouped > 1 ? c.grouped : '', 'data-mp-elgrouped', (v) => set({ grouped: Math.max(1, Math.round(v)) }), '1'));
+    if (IN_CONDUIT.has(String(c.method))) {
+      kit.field(t('res.el.cd.conduit'), opt([['', t('res.el.cd.none')], ...CONDUIT_FAMILIES.map((k) => [k, CONDUITS[k].label])], c.conduit, 'data-mp-elconduit', (v) => set({ conduit: v, conduitSize: '' })));
+      if (c.conduit) kit.field(t('res.el.cd.conduitsize'), opt([['', t('res.el.cd.conduitsize.auto')], ...CONDUITS[c.conduit].sizes.map((x) => [x.key, x.key + ' · ' + x.id + ' mm'])], c.conduitSize, 'data-mp-elconduitsize', (v) => set({ conduitSize: v })));   // i18n-ignore: units
+    }
     const ref = METHODS[c.method]?.ref, grp = METHODS[c.method]?.group;
     if (ref === 'C') kit.field(t('res.el.cd.arrangement'), opt([['', t('res.el.cd.arr.layer')], ['bundle', t('res.el.cd.arr.bundle')]], c.arrangement, 'data-mp-elarr', (v) => set({ arrangement: v })));
     if (ref === 'D') {
@@ -900,6 +905,24 @@ export function mountRes(modelUi) {
       if (!x.minOk) bad.push(say('bad.min', { s: r.minSection }));
       kit.rows.push(el('dt', {}, say('chosen')), el('dd', { className: bad.length ? 'bc-input-err' : 'bc-muted', 'data-mp-elchosen': '' },
         bad.length ? bad.join(' ') : say('chosen.ok', { section: c.section, iz: f1(x.iz), drop: x.drop ? x.drop.percent.toFixed(1) + ' %' : say('nodrop') })));   // i18n-ignore: unit
+    }
+    const cd = p.conduit;
+    if (cd) {
+      const fam = CONDUITS[cd.family], pct = (x) => (x * 100).toFixed(0) + ' %';   // i18n-ignore: unit
+      let txt, bad = false;
+      if (cd.pending) { txt = say('conduit.pending'); }
+      else if (cd.size) {
+        const f = cd.fill;
+        bad = !f.ok;
+        txt = say(f.ok ? 'conduit.ok' : 'conduit.over', { n: f.conductors, size: cd.size.key, fill: pct(f.ratio), limit: pct(f.limit), smallest: cd.smallest ? cd.smallest.key : '—' });   // i18n-ignore: no value
+        if (!f.ok && !cd.smallest) txt = say('conduit.none', { n: f.conductors, fill: pct(f.ratio), limit: pct(f.limit) });
+      } else {
+        bad = !cd.smallest;
+        txt = cd.smallest ? say('conduit.smallest', { size: cd.smallest.key, n: cd.conductors, section: cd.section }) : say('conduit.nofit', { n: cd.conductors, section: cd.section });
+      }
+      if (cd.together > 1 && !cd.pending) txt += ' ' + say('conduit.together', { n: cd.together });
+      kit.rows.push(el('dt', {}, say('conduit')), el('dd', { className: bad ? 'bc-input-err' : 'bc-muted', 'data-mp-elconduitfill': '' }, txt));
+      kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-muted', 'data-mp-elconduitsrc': '' }, say('conduit.source', { cable: CABLE_SOURCE.maker + ' ' + CABLE_SOURCE.line, conduit: CONDUIT_SOURCES[fam.source].maker + ' ' + CONDUIT_SOURCES[fam.source].line })));
     }
     if (!(c.length > 0)) kit.rows.push(el('dt', {}, ''), el('dd', { className: 'bc-muted', 'data-mp-elnolength': '' }, say('nolength')));
     kit.field('', kit.button(t('res.el.cd.size'), 'data-mp-elsizecircuits', () => {
