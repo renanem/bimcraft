@@ -3,7 +3,7 @@ title: Pipes and ducts
 summary: Draw pipe and duct runs on the plan by their centre lines; the elbows, tees, reducers and transitions are made for you, the runs belong to systems with connected ports in the IFC file, and they show in plans, schedules and the takeoff.
 section: tasks
 order: 36
-keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, storm, storm drain, downpipe, leader, rainwater, águas pluviais, condutor vertical, condutor horizontal, nbr 10844, ábaco, abacus, rainfall, water supply, pressure, head loss, tank, reservatório, nbr 5626, pesos, weights, vazão, pressão, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn
+keywords: pipe, pipes, piping, plumbing, duct, ducts, ductwork, hvac, mep, mechanical, elbow, tee, reducer, transition, fitting, fittings, valve, valves, gate valve, ball valve, globe valve, check valve, riser, slope, drain, sanitary, storm, vent, cold water, hot water, chilled water, heating, gas, fire protection, supply air, return air, exhaust, system, systems, port, ports, connector, connectors, fixture, fixtures, plumbing fixture, basin, sink, toilet, water closet, lavatory, kitchen sink, shower, laundry tub, fixture units, uhc, dfu, size the drains, drain sizing, building drain, branch, ramal, coletor, stack, stacks, tubo de queda, vent stack, branch vent, coluna de ventilação, ramal de ventilação, barrilete, size the vents, trap to vent, desconector, storm, storm drain, downpipe, leader, rainwater, águas pluviais, condutor vertical, condutor horizontal, nbr 10844, ábaco, abacus, rainfall, water supply, pressure, head loss, tank, reservatório, nbr 5626, pesos, weights, vazão, pressão, airflow, cfm, friction, equal friction, sizing, schedule, takeoff, nbr, nbr 5648, nbr 5688, nbr 8160, pvc soldável, esgoto, dn, fire, hydrant, hose reel, mangotinho, hidrante, incêndio, it 22, cbpmesp, hazen-williams
 ---
 
 ## What you'll do
@@ -120,6 +120,19 @@ Pick any water pipe fed from a tank to see:
 
 :::note
 A fixture may need more than 10 kPa: take its pressure from its maker. These checks help the design; the project's engineer chooses the method and signs the report.
+:::
+
+## Hydrants and hose reels (IT 22, São Paulo)
+
+A pipe of the **Fire** system is checked as Instrução Técnica 22/2025 of the Corpo de Bombeiros of São Paulo asks (updated by Portaria CCB 003/800/25). Pick it and give:
+
+- **Occupation column** and **Built area**: Tabela 3 of the IT gives the type of system and the fire reserve (RTI, in m³) for the column that holds your occupation and the area band. The column is the project's to choose: its occupations are in the IT's Tabela 3. Or name the **Type of system** (1 to 5; type 4 with the DN40 or the DN65 nozzle), which wins over the table.
+- **Hydrants this pipe serves**: the flow is that of the two most unfavourable jets (item 4.8.3), so the type's flow (Tabela 2: type 1 100 L/min, 2 150, 3 200, 4 300, 5 600) for one hydrant and twice it for two or more.
+
+BimCraft then shows the speed (at most 5 m/s, item 4.8.12), the head loss by Hazen–Williams (item 4.8.10.2, with the C factor of Tabela 1: 120 for steel, 150 for copper and plastic) over the pipe's length, and the pressure its start needs for the hydrant at its end: the type's pressure (Tabela 2, in mca) plus the loss plus the rise. The smallest size is DN65 (2½"), or DN50 (2") for types 1 and 2 (item 4.11.6). {{ui:Size the fire pipes}} makes each pipe too small or too fast the smallest size that is not, as one step you can undo.
+
+:::note
+Not checked here: fittings and valves in the loss, the pressure at the nozzles against the 100 mca limit (it needs the supply), the reservoir and pump (Annexes B and C), where the hydrants stand (item 4.7), the exemptions of Annex E, and the notes 1 and 2 of Tabela 3 (sprinklers lower the type or the reserve). The project's engineer chooses and signs.
 :::
 
 ## Storm drains (NBR 10844)

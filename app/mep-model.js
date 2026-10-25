@@ -59,6 +59,7 @@ import { CONNECTOR_PSET } from './family-model.js';
 import { drainNetwork, smallestSize, upstreamFirst, MAIN_MIN_DN } from './mep/drainage.js';
 import { ventNetwork, branchVentSize, ventStackSize, trapDistance, alongLine } from './mep/vents.js';
 import { waterNetwork, MAX_SPEED } from './mep/water.js';
+import { TYPES as FIRE_TYPES, TYPE_KEYS as FIRE_TYPE_KEYS, systemFor as fireSystemFor, checkRun as fireCheck, minNominalOf as fireMinNominal, designFlow as fireFlow, speed as fireSpeed, MAX_SPEED as FIRE_MAX_SPEED } from './mep/hydrants.js';
 import { stormNetwork, downpipeDiameter, manningFlow, MIN_SLOPE as STORM_MIN_SLOPE } from './mep/storm.js';
 /** The rainfall intensity a storm run counts when it says none (mm/h): what NBR 10844 allows for up to 100 m² of roof in plan. */
 export const STORM_RAIN = 150;
@@ -310,6 +311,7 @@ export function readRuns(w) {
       role: ps.DrainRole === 'main' || ps.DrainRole === 'stack' ? ps.DrainRole : 'branch', floors: ps.Floors === 'upto3' || ps.Floors === 'more' ? ps.Floors : '',
       water: ps.Water === 'weights' || ps.Water === 'sum' ? ps.Water : '', level: mmOf(w, ps.WaterLevel), waterNote: String(ps.WaterNote || ''),
       area: Number(ps.Area) || 0, rain: Number(ps.Rainfall) || 0, outlet: ps.Outlet === 'funnel' ? 'funnel' : 'edge', gutter: Number(ps.GutterDepth) || 0,
+      fireCol: [1, 2, 3, 4, 5].includes(Number(ps.FireColumn)) ? Number(ps.FireColumn) : 0, fireArea: Number(ps.FireArea) || 0, fireType: FIRE_TYPE_KEYS.includes(ps.FireType) ? ps.FireType : '', hydrants: Math.max(0, Math.floor(Number(ps.Hydrants) || 0)),
       valves: Array.isArray(valves) ? valves.filter((v) => v && Number.isFinite(v.s) && VALVE_KINDS[v.kind]).map((v) => ({ s: v.s, kind: v.kind })) : [],
       parts: aggKids(w, id),
     });
@@ -329,7 +331,8 @@ function writeDef(w, id, r) {
     ['Valves', 'IFCTEXT', JSON.stringify((r.valves || []).map((v) => ({ s: round(v.s, 3), kind: v.kind })))], ['DrainRole', 'IFCLABEL', r.role === 'main' || r.role === 'stack' ? r.role : 'branch'],
     ['Floors', 'IFCLABEL', r.floors === 'upto3' || r.floors === 'more' ? r.floors : ''],
     ['Water', 'IFCLABEL', r.water === 'weights' || r.water === 'sum' ? r.water : ''], Lm('WaterLevel', r.water ? r.level : 0), ['WaterNote', 'IFCTEXT', r.water ? String(r.waterNote || '').slice(0, 2000) : ''],
-    ['Area', 'IFCREAL', round(r.area || 0, 4)], ['Rainfall', 'IFCREAL', round(r.rain || 0, 4)], ['Outlet', 'IFCLABEL', r.outlet === 'funnel' ? 'funnel' : 'edge'], ['GutterDepth', 'IFCREAL', round(r.gutter || 0, 4)]]);
+    ['Area', 'IFCREAL', round(r.area || 0, 4)], ['Rainfall', 'IFCREAL', round(r.rain || 0, 4)], ['Outlet', 'IFCLABEL', r.outlet === 'funnel' ? 'funnel' : 'edge'], ['GutterDepth', 'IFCREAL', round(r.gutter || 0, 4)],
+    ['FireColumn', 'IFCINTEGER', [1, 2, 3, 4, 5].includes(r.fireCol) ? r.fireCol : 0], ['FireArea', 'IFCREAL', round(r.fireArea || 0, 4)], ['FireType', 'IFCLABEL', FIRE_TYPE_KEYS.includes(r.fireType) ? r.fireType : ''], ['Hydrants', 'IFCINTEGER', Math.max(0, Math.floor(r.hydrants || 0))]]);
 }
 /** Plane angles in the file's own unit (radians unless the project says degrees). */
 function angleUnit(w) {
@@ -967,6 +970,54 @@ export function sizeStorm() {
     for (const q of plan.values()) {
       if (!q.grow) continue;
       const r = runs.get(q.guid), next = { ...r, size: q.need };
+      writeDef(w, r.id, next);
+      relabel(w, r.id, next);
+      storeys.add(r.storey);
+    }
+    for (const st of storeys) regenMep(w, st);
+    return { id: null, ids: [] };
+  });
+}
+
+// ---- hydrants and hose reels (IT 22/2025 of the CBPMESP) ----
+/** The type of system of a fire run: the one it names, else the one Tabela 3 gives for its occupation column and built area
+ *  (a type 4 is the 40 mm nozzle one until the run says 4-65). */
+export const fireTypeOf = (r) => FIRE_TYPE_KEYS.includes(r.fireType) ? r.fireType : (() => { const s = fireSystemFor(r.fireCol, r.fireArea); return s ? (s.type === '4' ? '4-40' : s.type) : ''; })();
+/** Fire pipes (system fire) with a type and hydrants served: Map(guid → { id, guid, type, rti, q, v, j, loss, need, length, d, size, needSize, grow, speedOk, sizeOk, C }) */
+export function firePlan(w) {
+  const cache = new Map(), plan = new Map();
+  for (const r of readRuns(w)) {
+    if (r.kind !== 'pipe' || r.system !== 'fire') continue;
+    const sec = sectionOf(r);
+    if (!sec) continue;
+    const key = fireTypeOf(r), sys = fireSystemFor(r.fireCol, r.fireArea);
+    const verts = runVertices(r).map(worldOf(w, r.storey, cache));
+    let length = 0;
+    for (let i = 1; i < verts.length; i++) length += Math.hypot(...verts[i].map((x, k) => x - verts[i - 1][k])) / 1000;
+    const rise = verts.length > 1 ? (verts[verts.length - 1][2] - verts[0][2]) / 1000 : 0;
+    const nom = (p) => (p ? (p.metric ? p.dn : p.nps * 25.4) : 0);
+    const chk = key ? fireCheck({ key, hydrants: r.hydrants, d: sec.id, nominal: nom(sec.p), material: r.mat, length, rise }) : null;
+    let needSize = null;
+    if (key && chk && r.hydrants > 0) {
+      const min = fireMinNominal(key), q = fireFlow(key, r.hydrants);
+      for (const size of sizesFor(r.mat, r.cls)) {
+        const s = sectionOf({ ...r, size });
+        if (s && nom(s.p) + 1e-9 >= min && fireSpeed(q, s.id) <= FIRE_MAX_SPEED + 1e-9) { needSize = size; break; }
+      }
+    }
+    const grow = !!needSize && nom(sectionOf({ ...r, size: needSize }).p) > nom(sec.p) + 1e-9
+      || !!needSize && sectionOf({ ...r, size: needSize }).id > sec.id + 1e-6;
+    plan.set(r.guid, { id: r.id, guid: r.guid, type: key, rti: sys ? sys.rti : null, length, rise, d: sec.id, size: r.size, needSize, grow, ...(chk || {}), toobig: !!key && r.hydrants > 0 && !needSize });
+  }
+  return plan;
+}
+/** Every fire pipe too small for its hydrants (5 m/s, DN65 or DN50) made the smallest size that is not (one undo step; never smaller than drawn). */
+export function sizeFire() {
+  return op((w) => {
+    const plan = firePlan(w), runs = new Map(readRuns(w).map((r) => [r.guid, r])), storeys = new Set();
+    for (const q of plan.values()) {
+      if (!q.grow) continue;
+      const r = runs.get(q.guid), next = { ...r, size: q.needSize };
       writeDef(w, r.id, next);
       relabel(w, r.id, next);
       storeys.add(r.storey);
